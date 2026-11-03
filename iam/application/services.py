@@ -18,7 +18,11 @@ class AuthApplicationService:
         self.device_repository = device_repository or PeeweeDeviceRepository()
 
     def authenticate(self, device_id: str, api_key: str) -> bool:
-        """Authenticate a device by its MAC address and API key."""
+        """Check credentials against the identified device's access state.
+
+        A credential is accepted only when the device exists, is not revoked,
+        and its stored verifier matches the presented API key.
+        """
         device = self.device_repository.find_by_device_id(device_id)
         return device is not None and device.authenticate(api_key)
 
@@ -64,7 +68,7 @@ class AuthApplicationService:
         self,
         device_id: str,
         api_key: str,
-        device_type: DeviceType = DeviceType.ENVIRONMENT_MONITOR,
+        device_type: DeviceType = DeviceType.ENVIRONMENTAL_DEVICE,
     ) -> Device:
         """Retrieve the default test device, creating it if it does not exist.
 

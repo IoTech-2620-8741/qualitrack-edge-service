@@ -51,7 +51,7 @@ class DeviceRepository:
         self,
         device_id: str,
         api_key: str,
-        device_type: DeviceType = DeviceType.ENVIRONMENT_MONITOR,
+        device_type: DeviceType = DeviceType.ENVIRONMENTAL_DEVICE,
     ) -> Device:
         """Retrieve the configured development device or register it if absent."""
         row = DeviceModel.get_or_none(DeviceModel.device_id == device_id)

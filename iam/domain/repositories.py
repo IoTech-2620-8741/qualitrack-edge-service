@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from iam.domain.entities import Device
+from iam.domain.enums import DeviceType
 
 
 class DeviceRepository(Protocol):
@@ -16,6 +17,8 @@ class DeviceRepository(Protocol):
         """Persist a device aggregate's current state."""
         ...
 
-    def get_or_create_test_device(self, device_id: str, api_key: str) -> Device:
+    def get_or_create_test_device(
+        self, device_id: str, api_key: str, device_type: DeviceType
+    ) -> Device:
         """Retrieve or create the configured development device."""
         ...

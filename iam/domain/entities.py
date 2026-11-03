@@ -1,15 +1,19 @@
-"""IAM aggregatee roots"""
+"""IAM aggregate roots."""
 
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
-from iam.domain import credentials
 from iam.domain.credentials import ApiCredential
 from iam.domain.enums import DeviceType
 
+
 @dataclass(frozen=True)
 class Device:
-    """Registered device aggregate with credential and access lifecycle rules."""
+    """Registered device aggregate with credential and access lifecycle rules.
+
+    ``device_id`` is the identifier with which the cloud registers the node for
+    the Edge (``sensorExternalId``, for example ``ENV-001``).
+    """
 
     device_id: str
     credential: ApiCredential
@@ -19,13 +23,13 @@ class Device:
 
     def __post_init__(self) -> None:
         if not isinstance(self.device_id, str) or not self.device_id.strip():
-            raise ValueError("Devices identifier cannot be empty")
+            raise ValueError("Device identifier cannot be empty")
         if not isinstance(self.credential, ApiCredential):
-            raise ValueError("Devices requires an API credential verifier")
+            raise TypeError("Device requires an API credential verifier")
         if not isinstance(self.device_type, DeviceType):
-            raise ValueError("Devices required a valid device type")
-        if not isinstance(self.created_at,datetime):
-            raise ValueError("Device creation time must be a datatime")
+            raise TypeError("Device requires a valid device type")
+        if not isinstance(self.created_at, datetime):
+            raise TypeError("Device creation time must be a datetime")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("Device creation time must include a timezone")
         object.__setattr__(self, "created_at", self.created_at.astimezone(UTC))
@@ -46,7 +50,7 @@ class Device:
             device_type: DeviceType,
             created_at: datetime | None = None,
     ) -> "Device":
-        """Register a device and protect its API key with a one-way verifier"""
+        """Register a device and protect its API key with a one-way verifier."""
         return cls(
             device_id,
             ApiCredential.create(api_key),
@@ -68,7 +72,7 @@ class Device:
         return replace(self, revoked_at=revoked_at)
 
     def rotate_api_key(self, new_api_key: str) -> "Device":
-        """Return an active device with a newly protected API key"""
+        """Return an active device with a newly protected API key."""
         if self.revoked_at is not None:
             raise ValueError("Cannot rotate credentials for a revoked device")
         return replace(self, credential=ApiCredential.create(new_api_key))
