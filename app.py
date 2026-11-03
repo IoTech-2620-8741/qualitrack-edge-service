@@ -1,8 +1,9 @@
 """Flask application entry point for the QualiTrack Edge Service.
 
-This module wires together the Flask application, registers the IAM
-bounded-context Blueprint and the command groups, configures the SQLite
-database, and composes the cloud synchronization of the Tracking context.
+This module wires together the Flask application, registers the IAM and Tracking
+bounded-context Blueprints and the command groups, configures the SQLite
+database, and composes the Tracking-to-IAM anti-corruption layer and the cloud
+synchronization of the Tracking context.
 
 Typical usage::
 
@@ -26,9 +27,11 @@ from iam.interfaces.services import iam_api
 from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, db, init_db
-from tracking.application.services import DeviceRegistryApplicationService
+from tracking.application.services import DeviceRegistryApplicationService, TelemetryApplicationService
 from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 from tracking.interfaces.cli import cloud_cli
+from tracking.interfaces.services import tracking_api
 
 def create_app() -> Flask:
     """Create and initialize the Flask application."""
@@ -38,10 +41,14 @@ def create_app() -> Flask:
     init_db()
 
     app.register_blueprint(iam_api)
+    app.register_blueprint(tracking_api)
     app.cli.add_command(devices_cli)
     app.cli.add_command(cloud_cli)
     iam_authentication_service = AuthApplicationService()
     app.extensions["iam_authentication_service"] = iam_authentication_service
+    app.extensions["telemetry_service"] = TelemetryApplicationService(
+        iam_anti_corruption_layer=IamAntiCorruptionLayer(iam_authentication_service)
+    )
 
     registry_gateway = None
     if app.config["CLOUD_SYNC_ENABLED"]:
