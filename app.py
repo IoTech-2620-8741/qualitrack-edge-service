@@ -1,13 +1,16 @@
 """Flask application entry point for the QualiTrack Edge Service.
 
 This module wires together the Flask application, registers the IAM
-bounded-context Blueprint and configures the SQLite database.
+bounded-context Blueprint and command group, and configures the SQLite
+database.
 
 Typical usage::
 
     flask --app app run
     # or
     python app.py
+    # register a node
+    flask --app app devices register ENV-001 ENVIRONMENTAL_DEVICE
 """
 
 from pathlib import Path
@@ -16,6 +19,7 @@ from flask import Flask
 
 from config import load_config
 from iam.application.services import AuthApplicationService
+from iam.interfaces.cli import devices_cli
 from iam.interfaces.services import iam_api
 from shared.infrastructure.database import configure_database, db, init_db
 
@@ -27,6 +31,7 @@ def create_app() -> Flask:
     init_db()
 
     app.register_blueprint(iam_api)
+    app.cli.add_command(devices_cli)
     iam_authentication_service = AuthApplicationService()
     app.extensions["iam_authentication_service"] = iam_authentication_service
 
