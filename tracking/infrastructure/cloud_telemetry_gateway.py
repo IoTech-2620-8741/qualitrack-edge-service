@@ -1,0 +1,87 @@
+"""Cloud gateway that sends the pending readings and actions (TS61, TS62, TS63).
+
+It is the anti-corruption layer between Tracking and the Tracking & Telemetry
+context of the cloud: it builds the nested routes of the QualiTrack Cloud REST
+API from the cloud identifiers of each node and translates the records into
+its request resources.
+"""
+import logging
+
+import requests
+
+from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
+from tracking.domain.entities import ActuationEvent, MonitoredDevice, TelemetryReading
+from tracking.domain.enums import DeviceType, SyncStatus
+
+LOGGER = logging.getLogger(__name__)
+
+# Answers of the cloud that refuse a record for good: invalid data, or a node
+# that is not in that environment any more.
+_REJECTING_STATUSES = {400, 404, 409, 422}
+
+
+def _iso(value) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _environment_path(device: MonitoredDevice) -> str:
+    return f"/api/v1/laboratories/{device.laboratory_id}/environments/{device.environment_id}"
+
+
+def _container_monitor_path(device: MonitoredDevice) -> str:
+    return f"{_environment_path(device)}/container-monitors/{device.cloud_device_id}"
+
+
+class CloudTelemetryGateway:
+    """Send readings and actions to the cloud with the session of the Edge."""
+
+    def __init__(self, cloud_session: CloudSession):
+        self._cloud_session = cloud_session
+
+    def send_reading(self, device: MonitoredDevice, reading: TelemetryReading) -> SyncStatus:
+        """Send a reading of the environmental device (TS61) or a container monitor (TS62)."""
+        if device.device_type is DeviceType.ENVIRONMENTAL_DEVICE:
+            path = f"{_environment_path(device)}/telemetry-measurements"
+        else:
+            path = f"{_container_monitor_path(device)}/telemetry-measurements"
+        body = {
+            "metric": reading.metric.value,
+            "value": reading.value,
+            "textValue": reading.text_value,
+            "measuredAt": _iso(reading.measured_at.value),
+            "profileVersion": None if reading.profile_version is None else reading.profile_version.value,
+        }
+        return self._send(path, body, f"reading {reading.id}")
+
+    def send_actuation_event(self, device: MonitoredDevice, event: ActuationEvent) -> SyncStatus:
+        """Send an action of a container monitor (TS63)."""
+        body = {
+            "action": event.action.value,
+            "triggerMetric": None if event.trigger_metric is None else event.trigger_metric.value,
+            "triggerState": None if event.trigger_state is None else event.trigger_state.value,
+            "result": event.result.value,
+            "occurredAt": _iso(event.occurred_at.value),
+            "profileVersion": None if event.profile_version is None else event.profile_version.value,
+        }
+        return self._send(f"{_container_monitor_path(device)}/actuation-events", body, f"action {event.id}")
+
+    def _send(self, path: str, body: dict, record: str) -> SyncStatus:
+        response = self._cloud_session.request("POST", path, json=body)
+        if response.status_code in (200, 201):
+            return SyncStatus.SYNCED
+        if response.status_code in _REJECTING_STATUSES:
+            LOGGER.warning("The cloud rejected the %s (%s): %s", record, response.status_code, _message(response))
+            return SyncStatus.REJECTED
+        raise CloudRejectedError(
+            f"The cloud answered {response.status_code} to the {record}", response.status_code
+        )
+
+
+def _message(response: requests.Response) -> str:
+    try:
+        body = response.json()
+    except ValueError:
+        return "no details"
+    if isinstance(body, dict):
+        return str(body.get("message") or body.get("details") or body)
+    return str(body)
