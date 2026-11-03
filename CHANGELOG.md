@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tracking (tracking): every reading and action is kept in SQLite as `PENDING` until the cloud accepts it; a retry of the same observation is not stored twice and a retry with different data is rejected with `409`. `flask cloud pending` counts them by synchronization status (TS60) (#4).
 
+- Tracking (tracking): the pending readings of the environmental device (TS61) and the container monitors (TS62) and the actions (TS63) are sent oldest first to the nested routes of the cloud by the background thread and by `flask cloud sync`. The cloud's acceptance makes them `SYNCED` and its refusal `REJECTED`; records of a node the registry does not place in an environment wait (#5).
+
 ### Changed
 
 - IAM (iam): the device types and the device identifier follow the cloud registry: `ENVIRONMENTAL_DEVICE` instead of `ENVIRONMENT_MONITOR`, and the `sensorExternalId` of the node (for example `ENV-001`) instead of its MAC address (#1).
@@ -36,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The dependencies file is `requirements.txt` (#1).
 
 - The configuration requires `CLOUD_SYNC_ENABLED`, and the other `CLOUD_*` settings when it is true (#3).
+
+- Tracking (tracking): `flask cloud sync` also sends the pending telemetry after reading the device registry (#5).
 
 ### Removed
 

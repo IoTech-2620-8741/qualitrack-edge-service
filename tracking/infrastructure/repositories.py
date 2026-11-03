@@ -55,6 +55,25 @@ class TelemetryReadingRepository:
             with database.atomic("IMMEDIATE"):
                 return self._save(readings)
 
+    def find_pending(self, after_id: int, limit: int) -> list[TelemetryReading]:
+        """Load up to ``limit`` pending readings stored after ``after_id``, oldest first."""
+        query = (
+            TelemetryReadingModel.select()
+            .where(
+                (TelemetryReadingModel.sync_status == SyncStatus.PENDING.value)
+                & (TelemetryReadingModel.id > after_id)
+            )
+            .order_by(TelemetryReadingModel.id)
+            .limit(limit)
+        )
+        return [self._to_entity(row) for row in query]
+
+    def save_sync_status(self, reading: TelemetryReading) -> None:
+        """Persist the synchronization status of a stored reading."""
+        TelemetryReadingModel.update(sync_status=reading.sync_status.value).where(
+            TelemetryReadingModel.id == reading.id
+        ).execute()
+
     def count_by_sync_status(self) -> dict[SyncStatus, int]:
         """Count the stored readings of each synchronization status."""
         return _count_by_sync_status(TelemetryReadingModel)
@@ -114,6 +133,25 @@ class ActuationEventRepository:
         except peewee.IntegrityError:
             with database.atomic("IMMEDIATE"):
                 return self._save(event)
+
+    def find_pending(self, after_id: int, limit: int) -> list[ActuationEvent]:
+        """Load up to ``limit`` pending actions stored after ``after_id``, oldest first."""
+        query = (
+            ActuationEventModel.select()
+            .where(
+                (ActuationEventModel.sync_status == SyncStatus.PENDING.value)
+                & (ActuationEventModel.id > after_id)
+            )
+            .order_by(ActuationEventModel.id)
+            .limit(limit)
+        )
+        return [self._to_entity(row) for row in query]
+
+    def save_sync_status(self, event: ActuationEvent) -> None:
+        """Persist the synchronization status of a stored action."""
+        ActuationEventModel.update(sync_status=event.sync_status.value).where(
+            ActuationEventModel.id == event.id
+        ).execute()
 
     def count_by_sync_status(self) -> dict[SyncStatus, int]:
         """Count the stored actions of each synchronization status."""

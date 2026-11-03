@@ -27,8 +27,13 @@ from iam.interfaces.services import iam_api
 from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, db, init_db
-from tracking.application.services import DeviceRegistryApplicationService, TelemetryApplicationService
+from tracking.application.services import (
+    DeviceRegistryApplicationService,
+    TelemetryApplicationService,
+    TelemetrySynchronizationApplicationService,
+)
 from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 from tracking.interfaces.cli import cloud_cli
 from tracking.interfaces.services import tracking_api
@@ -50,7 +55,7 @@ def create_app() -> Flask:
         iam_anti_corruption_layer=IamAntiCorruptionLayer(iam_authentication_service)
     )
 
-    registry_gateway = None
+    registry_gateway = telemetry_gateway = None
     if app.config["CLOUD_SYNC_ENABLED"]:
         cloud_session = CloudSession(
             app.config["CLOUD_API_URL"],
@@ -58,12 +63,19 @@ def create_app() -> Flask:
             app.config["CLOUD_PASSWORD"],
         )
         registry_gateway = CloudDeviceRegistryGateway(cloud_session)
+        telemetry_gateway = CloudTelemetryGateway(cloud_session)
     device_registry_service = DeviceRegistryApplicationService(registry_gateway)
+    telemetry_synchronization_service = TelemetrySynchronizationApplicationService(telemetry_gateway)
     app.extensions["device_registry_service"] = device_registry_service
+    app.extensions["telemetry_synchronization_service"] = telemetry_synchronization_service
     if registry_gateway is not None:
+        # The registry goes first: it gives the cloud route of each pending record.
         app.extensions["cloud_sync_scheduler"] = CloudSyncScheduler(
             app.config["CLOUD_SYNC_INTERVAL_SECONDS"],
-            [("device registry", device_registry_service.synchronize_registry)],
+            [
+                ("device registry", device_registry_service.synchronize_registry),
+                ("pending telemetry", telemetry_synchronization_service.synchronize_pending),
+            ],
         )
 
     if app.config["SEED_TEST_DEVICE"]:

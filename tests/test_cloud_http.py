@@ -1,27 +1,50 @@
 import json
 import threading
 import unittest
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app import create_app
 from shared.infrastructure.cloud_session import CloudSession
-from tracking.application.services import DeviceRegistryApplicationService
+from tracking.application.services import DeviceRegistryApplicationService, TelemetrySynchronizationApplicationService
 from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
+from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
 from tracking.infrastructure.repositories import MonitoredDeviceRepository
+
+_ENVIRONMENT_TELEMETRY = "/api/v1/laboratories/7/environments/2/telemetry-measurements"
 
 
 class FakeCloudHandler(BaseHTTPRequestHandler):
-    """Answers the sign-in and the equipment list as the QualiTrack Cloud REST API does."""
+    """Answers as the QualiTrack Cloud REST API does: sign-in, equipment list and telemetry.
+
+    The telemetry route answers ``201`` for a new reading, ``200`` for one it
+    already has and ``400`` for a negative air quality.
+    """
 
     received = []
+    stored = set()
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.received.append(("POST", self.path, body, self.headers.get("Authorization")))
+        if self.path == _ENVIRONMENT_TELEMETRY:
+            return self._telemetry(body)
         if self.path != "/api/v1/authentication/sign-in" or body.get("password") != "local-secret":
             return self._answer(401, {"message": "Invalid credentials"})
         self._answer(200, {"id": 3, "username": body["username"], "token": "jwt-token",
                            "roles": ["ROLE_OPERATOR"], "laboratoryId": 7, "passwordChangeRequired": False})
+
+    def _telemetry(self, body):
+        if self.headers.get("Authorization") != "Bearer jwt-token":
+            return self._answer(401, {"message": "Unauthorized"})
+        if body["metric"] == "AIR_QUALITY" and body["value"] < 0:
+            return self._answer(400, {"message": "Invalid air quality"})
+        key = (body["metric"], body["measuredAt"])
+        created = key not in self.stored
+        self.stored.add(key)
+        self._answer(201 if created else 200, {"id": len(self.stored), **body})
 
     def do_GET(self):
         self.received.append(("GET", self.path, None, self.headers.get("Authorization")))
@@ -63,10 +86,59 @@ class CloudOverHttpTestCase(unittest.TestCase):
 
     def setUp(self):
         FakeCloudHandler.received.clear()
+        FakeCloudHandler.stored.clear()
+        self._clear_tables()
+
+    def tearDown(self):
+        self._clear_tables()
+
+    def _clear_tables(self):
+        with self.app.app_context():
+            TelemetryReadingModel.delete().execute()
+            ActuationEventModel.delete().execute()
+            MonitoredDeviceRepository().replace_all([])
 
     def service(self, password):
         session = CloudSession(self.base_url, "edge.operator@lab.pe", password)
         return DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session), MonitoredDeviceRepository())
+
+    def test_the_sync_command_sends_what_the_nodes_sent_to_the_edge(self):
+        client = self.app.test_client()
+        measured_at = (datetime.now(UTC) - timedelta(minutes=10)).replace(microsecond=0)
+        for minutes, air_quality in ((0, 412.5), (1, -3.0)):
+            sent = client.post("/api/v1/monitoring/environment-readings", headers={"X-API-Key": "test-only-key"},
+                               json={"device_id": "ENV-001", "air_quality": air_quality, "profile_version": 2,
+                                     "measured_at": (measured_at + timedelta(minutes=minutes)).isoformat()})
+            self.assertEqual(sent.status_code, 201)
+        session = CloudSession(self.base_url, "edge.operator@lab.pe", "local-secret")
+        services = {
+            "device_registry_service": DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session)),
+            "telemetry_synchronization_service": TelemetrySynchronizationApplicationService(
+                CloudTelemetryGateway(session)),
+        }
+        previous = {name: self.app.extensions[name] for name in services}
+        self.app.extensions.update(services)
+        try:
+            with self.assertLogs("tracking.infrastructure.cloud_telemetry_gateway", "WARNING"):
+                first = self.app.test_cli_runner().invoke(args=["cloud", "sync"])
+            second = self.app.test_cli_runner().invoke(args=["cloud", "sync"])
+        finally:
+            self.app.extensions.update(previous)
+
+        self.assertEqual(first.exit_code, 0, first.output)
+        self.assertIn("Device registry: 1 device(s) from the cloud", first.output)
+        self.assertIn("Readings: 1 synced, 1 rejected, 0 waiting", first.output)
+        self.assertIn("Readings: 0 synced, 0 rejected, 0 waiting", second.output)
+        telemetry = [(body, authorization) for method, path, body, authorization in FakeCloudHandler.received
+                     if path == _ENVIRONMENT_TELEMETRY]
+        self.assertEqual(len(telemetry), 2)
+        self.assertEqual(telemetry[0], ({
+            "metric": "AIR_QUALITY", "value": 412.5, "textValue": None,
+            "measuredAt": measured_at.isoformat().replace("+00:00", "Z"), "profileVersion": 2,
+        }, "Bearer jwt-token"))
+        with self.app.app_context():
+            statuses = [row.sync_status for row in TelemetryReadingModel.select().order_by(TelemetryReadingModel.id)]
+        self.assertEqual(statuses, ["SYNCED", "REJECTED"])
 
     def test_reads_the_registry_over_http_with_the_operator_token(self):
         with self.app.app_context():

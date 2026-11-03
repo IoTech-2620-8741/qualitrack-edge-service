@@ -27,6 +27,13 @@ def _positive_id(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _check_synchronization(current: SyncStatus, answer: SyncStatus) -> None:
+    if current is not SyncStatus.PENDING:
+        raise ValueError("Only a pending record is synchronized")
+    if answer not in (SyncStatus.SYNCED, SyncStatus.REJECTED):
+        raise ValueError("The cloud either accepts or rejects a record")
+
+
 def _utc(value: datetime, name: str) -> datetime:
     if not isinstance(value, datetime):
         raise TypeError(f"{name} must be a datetime")
@@ -148,6 +155,16 @@ class TelemetryReading:
         """Return this immutable reading with its persistence identity."""
         return replace(self, id=reading_id)
 
+    def synchronized(self, status: SyncStatus) -> "TelemetryReading":
+        """Return this reading with the answer of the cloud (TS61, TS62).
+
+        Raises:
+            ValueError: The reading is no longer pending, or ``status`` is not
+                an answer (``SYNCED`` or ``REJECTED``).
+        """
+        _check_synchronization(self.sync_status, status)
+        return replace(self, sync_status=status)
+
 
 @dataclass(frozen=True)
 class ActuationEvent:
@@ -234,6 +251,16 @@ class ActuationEvent:
     def with_persistence_id(self, event_id: int) -> "ActuationEvent":
         """Return this immutable action with its persistence identity."""
         return replace(self, id=event_id)
+
+    def synchronized(self, status: SyncStatus) -> "ActuationEvent":
+        """Return this action with the answer of the cloud (TS63).
+
+        Raises:
+            ValueError: The action is no longer pending, or ``status`` is not
+                an answer (``SYNCED`` or ``REJECTED``).
+        """
+        _check_synchronization(self.sync_status, status)
+        return replace(self, sync_status=status)
 
 
 @dataclass(frozen=True)

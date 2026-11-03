@@ -1,5 +1,8 @@
 """Command-line interface for the cloud synchronization of the Tracking context.
 
+``cloud sync`` runs now what the background thread runs every interval: it
+reads the device registry and sends the pending readings and actions.
+
 Usage::
 
     flask --app app cloud sync
@@ -22,14 +25,21 @@ def _registry_service():
 
 @cloud_cli.command("sync")
 def synchronize() -> None:
-    """Read now the nodes the cloud registers for the laboratory."""
+    """Read the device registry and send the pending readings and actions now."""
     try:
         devices = _registry_service().synchronize_registry()
+        click.echo(f"Device registry: {len(devices)} device(s) from the cloud")
+        summaries = current_app.extensions["telemetry_synchronization_service"].synchronize_pending()
     except CloudSynchronizationDisabled as error:
         raise click.ClickException("Cloud synchronization is disabled (CLOUD_SYNC_ENABLED=false)") from error
     except CloudRequestError as error:
         raise click.ClickException(str(error)) from error
-    click.echo(f"Device registry: {len(devices)} device(s) from the cloud")
+    for label, key in (("Readings", "readings"), ("Actuation events", "actuation_events")):
+        summary = summaries[key]
+        click.echo(
+            f"{label}: {summary.synced} synced, {summary.rejected} rejected, "
+            f"{summary.waiting} waiting for their node in the cloud registry"
+        )
 
 
 @cloud_cli.command("pending")
