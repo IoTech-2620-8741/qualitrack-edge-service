@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 _SCHEME = "pbkdf2_sha256"
 _ITERATIONS = 310_000
 _MAX_ITERATIONS = 1_000_000
+_GENERATED_SECRET_BYTES = 32
 
 
 @dataclass(frozen=True, repr=False)
@@ -25,6 +26,11 @@ class ApiCredential:
             raise ValueError("Invalid API key verifier material")
         if not 100_000 <= self._iterations <= _MAX_ITERATIONS:
             raise ValueError("Invalid API key verifier work factor")
+
+    @staticmethod
+    def generate_secret() -> str:
+        """Return a new random URL-safe API key for a device."""
+        return secrets.token_urlsafe(_GENERATED_SECRET_BYTES)
 
     @classmethod
     def create(cls, secret: str) -> "ApiCredential":
