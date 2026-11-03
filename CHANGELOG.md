@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-11-03
+## [0.1.0] - 2026-11-03
 
 First version of the Edge Application of QualiTrack: the Edge stories of the QualiTrack Report (TS53–TS64) and the deployment on the local station.
 
