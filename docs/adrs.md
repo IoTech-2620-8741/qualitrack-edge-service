@@ -187,6 +187,7 @@ that are not ready with their own errors. Production requires `https`.
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
+- **Amended by**: ADR-0011, which keeps only the nodes registered in this Edge
 
 ### Context
 
@@ -338,3 +339,42 @@ and rotates its logs. CI runs the compose file and builds the image for
   diverges from the report.
 - Several worker processes, which SQLite and the synchronization thread do not
   support.
+
+## ADR-0011: Keep only the nodes registered in this Edge
+
+- **Status**: Accepted
+- **Date**: 2026-11-03
+
+### Context
+
+The cloud lists the equipment of the whole laboratory, and the laboratory may
+have nodes in environments that another local station serves. Copying them
+made the Edge read one profile per node of the laboratory every cycle, a load
+the Raspberry Pi of the station does not need. The cloud has no list of
+equipment per environment.
+
+### Decision
+
+The Edge keeps only the nodes registered in it with `flask devices register`.
+Tracking asks IAM for their identifiers through its anti-corruption layer
+(`registered_device_ids`), keeps from the cloud registry only those nodes and
+reads the profiles of those nodes only. Revoked nodes stay, so the records
+they sent before can still be synchronized. `flask cloud sync` names the nodes
+registered in the Edge that the cloud does not have.
+
+### Consequences
+
+- The station reads one profile per own node, whatever the size of the
+  laboratory.
+- No setting or cloud change is needed, and a node keeps working when the
+  cloud moves it to another environment.
+- The list of equipment is still downloaded whole, in one request per cycle.
+- A node registered with an identifier the cloud does not have waits until
+  the identifiers match.
+
+### Alternatives considered
+
+- Environment identifiers in the settings of the station, which must be
+  looked up and kept by hand and lose a node that changes environment.
+- A list of equipment per environment in the cloud, which needs a change and
+  a deployment of the cloud and still needs the environments of each station.

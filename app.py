@@ -68,7 +68,7 @@ def create_app() -> Flask:
         registry_gateway = CloudDeviceRegistryGateway(cloud_session)
         profile_gateway = CloudProfileGateway(cloud_session)
         telemetry_gateway = CloudTelemetryGateway(cloud_session)
-    device_registry_service = DeviceRegistryApplicationService(registry_gateway)
+    device_registry_service = DeviceRegistryApplicationService(registry_gateway, iam_anti_corruption_layer)
     environmental_profile_service = EnvironmentalProfileApplicationService(
         profile_gateway, iam_anti_corruption_layer
     )

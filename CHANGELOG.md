@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-03
+
+### Changed
+
+- Tracking (tracking): the device registry keeps only the nodes registered in this Edge, read from IAM through the anti-corruption layer, so the Edge no longer stores the nodes of other stations of the laboratory nor reads their profiles. `flask cloud sync` names the nodes registered in the Edge that the cloud does not have (#14).
+
 ## [0.1.0] - 2026-11-03
 
 First version of the Edge Application of QualiTrack: the Edge stories of the QualiTrack Report (TS53–TS64) and the deployment on the local station.
