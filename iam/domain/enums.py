@@ -1,13 +1,10 @@
+"""Enumerations for the IAM bounded context."""
+
 from enum import Enum
 
-class DeviceType(Enum):
-    """Enumeration of QualyTrack IoT devices"""
-    ENVIRONMENT_MONITOR = "ENVIRONMENT_MONITOR"
+
+class DeviceType(str, Enum):
+    """Types of the QualiTrack ESP32 nodes, named as the cloud registers them."""
+
+    ENVIRONMENTAL_DEVICE = "ENVIRONMENTAL_DEVICE"
     CONTAINER_MONITOR = "CONTAINER_MONITOR"
-
-class DeviceStatus(Enum):
-    """Enumeration of device lifecycle statuses."""
-
-    REGISTERED = "REGISTERED"
-    CONFIGURED = "CONFIGURED"
-    CALIBRATED = "CALIBRATED"
