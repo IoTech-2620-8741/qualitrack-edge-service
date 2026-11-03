@@ -54,6 +54,14 @@ class TelemetryReadingRepository(Protocol):
         """
         ...
 
+    def find_pending(self, after_id: int, limit: int) -> list[TelemetryReading]:
+        """Load up to ``limit`` pending readings stored after ``after_id``, oldest first."""
+        ...
+
+    def save_sync_status(self, reading: TelemetryReading) -> None:
+        """Persist the synchronization status of a stored reading."""
+        ...
+
     def count_by_sync_status(self) -> dict[SyncStatus, int]:
         """Count the stored readings of each synchronization status."""
         ...
@@ -68,6 +76,14 @@ class ActuationEventRepository(Protocol):
         Raises:
             TelemetryConflict: The stored action has different data.
         """
+        ...
+
+    def find_pending(self, after_id: int, limit: int) -> list[ActuationEvent]:
+        """Load up to ``limit`` pending actions stored after ``after_id``, oldest first."""
+        ...
+
+    def save_sync_status(self, event: ActuationEvent) -> None:
+        """Persist the synchronization status of a stored action."""
         ...
 
     def count_by_sync_status(self) -> dict[SyncStatus, int]:
