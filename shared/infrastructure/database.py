@@ -26,6 +26,6 @@ def init_db() -> None:
     if db.is_closed():
         db.connect()
     from iam.infrastructure.models import Device
-    from tracking.infrastructure.models import MonitoredDevice
+    from tracking.infrastructure.models import ActuationEvent, MonitoredDevice, TelemetryReading
 
-    db.create_tables([Device, MonitoredDevice], safe=True)
+    db.create_tables([Device, MonitoredDevice, TelemetryReading, ActuationEvent], safe=True)

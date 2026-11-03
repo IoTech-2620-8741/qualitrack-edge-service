@@ -27,11 +27,14 @@ The QualiTrack nodes are:
   - local copy of the device registry of the laboratory (environment and cloud
     identifiers of each node), refreshed by a background thread and by
     `flask cloud sync`
+  - reception of the air quality and motion of the environmental device
+    (TS55), of the temperature, humidity, luminosity and RFID tags of the
+    container monitor (TS56), and of the actions of the container monitor
+    (TS57), validated with the rules of the cloud
+  - local storage of every reading and action as `PENDING` until the cloud
+    accepts it (TS60); a retry of the same observation is not stored twice
   - SQLite persistence through Peewee
 - **Planned** (technical stories of the QualiTrack Report, epic EP07)
-  - reception of environmental and container readings and of actuation events
-    (TS55, TS56, TS57)
-  - local storage of the records that are not synchronized yet (TS60)
   - synchronization of readings and actuation events with the cloud (TS61,
     TS62, TS63)
   - download of the environmental profile of each node from the cloud and
@@ -50,17 +53,19 @@ Identifies the ESP32 nodes and validates their credentials.
 
 ### Tracking
 
-Synchronizes the Edge with the cloud. It is the Edge counterpart of the
-Tracking & Telemetry bounded context of the cloud platform.
+Receives the telemetry and actions of the nodes, keeps them until the cloud
+accepts them, and synchronizes the Edge with the cloud. It is the Edge
+counterpart of the Tracking & Telemetry bounded context of the cloud platform.
 
-- **Core concept**: `MonitoredDevice`, a node the cloud registers for the
-  laboratory, with its environment and the cloud identifiers its telemetry is
-  synchronized to.
+- **Core concepts**: `TelemetryReading` (one metric a node measured at a
+  moment) and `ActuationEvent` (an action of a container monitor), each with
+  its synchronization status; `MonitoredDevice`, a node the cloud registers for
+  the laboratory, with the cloud identifiers its telemetry is synchronized to.
+- **Anti-corruption layer**: `IamAntiCorruptionLayer` translates IAM's
+  authentication into Tracking's own `ReportingDevice`, so Tracking does not
+  depend on IAM's model.
 - **Cloud gateway**: `CloudDeviceRegistryGateway` reads the equipment of the
   laboratory and translates the IoT devices into `MonitoredDevice`.
-- **Next**: it will receive the telemetry and actuation events of the nodes,
-  keep them until they are synchronized, and keep the environmental profile
-  each node applies.
 
 ### Shared
 
@@ -75,8 +80,12 @@ Each bounded context follows the same structure:
 - **Domain**: entities, value objects, repository contracts and business rules,
   without framework or ORM concerns.
 - **Application**: use cases that coordinate repositories and domain objects.
-- **Infrastructure**: Peewee models and repository implementations.
-- **Interfaces**: Flask HTTP endpoints and request validation with Pydantic.
+- **Integration**: the anti-corruption layer a context uses to reach another
+  one.
+- **Infrastructure**: Peewee models, repository implementations and cloud
+  gateways.
+- **Interfaces**: Flask HTTP endpoints with request validation in Pydantic, and
+  Flask commands.
 
 ```text
 qualitrack-edge-service/
@@ -90,6 +99,7 @@ qualitrack-edge-service/
 ├── tracking/
 │   ├── domain/
 │   ├── application/
+│   ├── integration/
 │   ├── infrastructure/
 │   └── interfaces/
 ├── shared/
@@ -197,6 +207,9 @@ APP_ENV=development python app.py
 only. Production must run behind a production WSGI server with a single worker
 process, as SQLite and the synchronization thread expect.
 
+`flask --app app cloud pending` counts the stored readings and actions by
+synchronization status (`PENDING`, `SYNCED`, `REJECTED`).
+
 ### 7. Run the tests
 
 ```sh
@@ -241,6 +254,110 @@ active, and presents its matching API key (TS53, TS54).
   "authenticated": true
 }
 ```
+
+### Send readings and actions
+
+The three endpoints below share these rules:
+
+- Headers: `Content-Type: application/json` and `X-API-Key: <node api key>`;
+  the body carries the `device_id` of the node.
+- Times are ISO 8601 with an offset, supplied by the node and normalized to
+  UTC. They cannot be more than 5 minutes in the future, as in the cloud.
+- `profile_version` (optional) is the version of the environmental profile the
+  node applied.
+- A node, metric and measurement time identify a reading, and a node, action
+  and time identify an action, as in the cloud. Sending the same observation
+  again returns the stored one with `200 OK` instead of storing it twice;
+  sending it with different data returns `409 Conflict` and stores nothing of
+  that request.
+- Every stored reading and action starts as `PENDING` until the cloud accepts
+  it.
+
+| Response | When |
+|---|---|
+| `201 Created` | something new was stored |
+| `200 OK` | identical retry |
+| `400 Bad Request` | invalid JSON, unknown fields, a missing or naive time, a future time, a non-finite value, motion other than `true`/`false`, a tag longer than 120 characters, an incomplete cause, or no metric at all |
+| `401 Unauthorized` | missing `device_id`, missing or invalid API key, unknown or revoked node |
+| `403 Forbidden` | the node type does not send that telemetry |
+| `409 Conflict` | the observation was already sent with different data |
+| `415 Unsupported Media Type` | the request is not JSON |
+
+#### Environmental device readings (TS55)
+
+`POST /api/v1/monitoring/environment-readings`
+
+```json
+{
+  "device_id": "ENV-001",
+  "measured_at": "2026-11-03T10:15:00-05:00",
+  "profile_version": 3,
+  "air_quality": 412.5,
+  "motion": true
+}
+```
+
+`air_quality` is in ppm and `motion` is `true` when motion is detected and
+`false` when the zone is quiet again. Each one is optional, but a reading needs
+at least one.
+
+```json
+{
+  "device_id": "ENV-001",
+  "measured_at": "2026-11-03T15:15:00Z",
+  "profile_version": 3,
+  "readings": [
+    {"id": 1, "metric": "AIR_QUALITY", "value": 412.5, "text_value": null, "sync_status": "PENDING"},
+    {"id": 2, "metric": "MOTION", "value": 1.0, "text_value": null, "sync_status": "PENDING"}
+  ]
+}
+```
+
+#### Container monitor readings (TS56)
+
+`POST /api/v1/monitoring/container-readings`
+
+```json
+{
+  "device_id": "CNT-001",
+  "measured_at": "2026-11-03T10:15:00-05:00",
+  "profile_version": 3,
+  "temperature": 21.5,
+  "humidity": 48,
+  "luminosity": 120,
+  "rfid_tag": "E200-3412-0001"
+}
+```
+
+`temperature` is in °C, `humidity` in %, `luminosity` in lux and `rfid_tag` is
+the tag read on the container. Each one is optional, but a reading needs at
+least one. The response has the same shape as the environmental one.
+
+#### Container monitor actions (TS57)
+
+`POST /api/v1/control/actuation-events`
+
+```json
+{
+  "device_id": "CNT-001",
+  "action": "VENTILATION_ON",
+  "trigger_metric": "TEMPERATURE",
+  "trigger_state": "WARNING",
+  "result": "EXECUTED",
+  "occurred_at": "2026-11-03T10:15:05-05:00",
+  "profile_version": 3
+}
+```
+
+- `action`: `VENTILATION_ON`, `VENTILATION_OFF`, `COOLING_ON`, `COOLING_OFF`,
+  `SERVO_OPEN` or `SERVO_CLOSE`.
+- `trigger_metric` and `trigger_state` (optional, together): the metric with
+  thresholds (`TEMPERATURE`, `HUMIDITY` or `LUMINOSITY`) and the state
+  (`WARNING`, `CRITICAL` or `NORMAL`) that caused the action. An action opened
+  by an RFID tag has no cause.
+- `result` (optional): `EXECUTED` (default) or `FAILED`.
+
+The response is the stored action with its `id` and `sync_status`.
 
 ## Changelog
 

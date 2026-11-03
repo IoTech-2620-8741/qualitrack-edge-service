@@ -1,10 +1,162 @@
-"""Repository implementations for the Tracking bounded context."""
+"""Repository implementations for the Tracking bounded context.
 
-from datetime import UTC
+They map between the Tracking domain entities and the Peewee models, keeping
+the domain layer free of infrastructure concerns.
+"""
 
-from tracking.domain.entities import MonitoredDevice
-from tracking.domain.enums import DeviceStatus, DeviceType
+from datetime import UTC, datetime
+
+import peewee
+
+from tracking.domain.entities import ActuationEvent, MonitoredDevice, TelemetryReading
+from tracking.domain.enums import (
+    ActuationAction,
+    ActuationResult,
+    DeviceStatus,
+    DeviceType,
+    EnvironmentalState,
+    Metric,
+    SyncStatus,
+)
+from tracking.domain.errors import TelemetryConflict
+from tracking.domain.repositories import ActuationEventSaveResult, TelemetryReadingSaveResult
+from tracking.domain.value_objects import ObservationTime, ProfileVersion
+from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
 from tracking.infrastructure.models import MonitoredDevice as MonitoredDeviceModel
+from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _count_by_sync_status(model) -> dict[SyncStatus, int]:
+    counts = {status: 0 for status in SyncStatus}
+    query = model.select(model.sync_status, peewee.fn.COUNT(model.id).alias("total")).group_by(model.sync_status)
+    for row in query:
+        counts[SyncStatus(row.sync_status)] = row.total
+    return counts
+
+
+class TelemetryReadingRepository:
+    """Persist the readings the Edge received, once per node, metric and time."""
+
+    def save_idempotently(self, readings: list[TelemetryReading]) -> TelemetryReadingSaveResult:
+        """Persist new readings and return the stored ones that a retry repeats.
+
+        The unique index on node, metric and time protects concurrent retries;
+        comparing the data ensures a retry cannot change a stored reading.
+        """
+        database = TelemetryReadingModel._meta.database
+        try:
+            with database.atomic("IMMEDIATE"):
+                return self._save(readings)
+        except peewee.IntegrityError:
+            with database.atomic("IMMEDIATE"):
+                return self._save(readings)
+
+    def count_by_sync_status(self) -> dict[SyncStatus, int]:
+        """Count the stored readings of each synchronization status."""
+        return _count_by_sync_status(TelemetryReadingModel)
+
+    def _save(self, readings: list[TelemetryReading]) -> TelemetryReadingSaveResult:
+        stored, created = [], False
+        for reading in readings:
+            row = TelemetryReadingModel.get_or_none(
+                (TelemetryReadingModel.device_id == reading.device_id)
+                & (TelemetryReadingModel.metric == reading.metric.value)
+                & (TelemetryReadingModel.measured_at == reading.measured_at.value)
+            )
+            if row is not None:
+                existing = self._to_entity(row)
+                if not existing.is_same_observation(reading):
+                    raise TelemetryConflict
+                stored.append(existing)
+                continue
+            row = TelemetryReadingModel.create(
+                device_id=reading.device_id,
+                metric=reading.metric.value,
+                value=reading.value,
+                text_value=reading.text_value,
+                measured_at=reading.measured_at.value,
+                profile_version=None if reading.profile_version is None else reading.profile_version.value,
+                received_at=reading.received_at,
+                sync_status=reading.sync_status.value,
+            )
+            stored.append(reading.with_persistence_id(row.id))
+            created = True
+        return TelemetryReadingSaveResult(stored, created)
+
+    @staticmethod
+    def _to_entity(row: TelemetryReadingModel) -> TelemetryReading:
+        return TelemetryReading(
+            row.device_id,
+            Metric(row.metric),
+            row.value,
+            row.text_value,
+            ObservationTime(_as_utc(row.measured_at)),
+            ProfileVersion.from_optional(row.profile_version),
+            _as_utc(row.received_at),
+            SyncStatus(row.sync_status),
+            row.id,
+        )
+
+
+class ActuationEventRepository:
+    """Persist the actions the Edge received, once per node, action and time."""
+
+    def save_idempotently(self, event: ActuationEvent) -> ActuationEventSaveResult:
+        """Persist a new action or return the stored one that a retry repeats."""
+        database = ActuationEventModel._meta.database
+        try:
+            with database.atomic("IMMEDIATE"):
+                return self._save(event)
+        except peewee.IntegrityError:
+            with database.atomic("IMMEDIATE"):
+                return self._save(event)
+
+    def count_by_sync_status(self) -> dict[SyncStatus, int]:
+        """Count the stored actions of each synchronization status."""
+        return _count_by_sync_status(ActuationEventModel)
+
+    def _save(self, event: ActuationEvent) -> ActuationEventSaveResult:
+        row = ActuationEventModel.get_or_none(
+            (ActuationEventModel.device_id == event.device_id)
+            & (ActuationEventModel.action == event.action.value)
+            & (ActuationEventModel.occurred_at == event.occurred_at.value)
+        )
+        if row is not None:
+            existing = self._to_entity(row)
+            if not existing.is_same_observation(event):
+                raise TelemetryConflict
+            return ActuationEventSaveResult(existing, False)
+        row = ActuationEventModel.create(
+            device_id=event.device_id,
+            action=event.action.value,
+            trigger_metric=None if event.trigger_metric is None else event.trigger_metric.value,
+            trigger_state=None if event.trigger_state is None else event.trigger_state.value,
+            result=event.result.value,
+            occurred_at=event.occurred_at.value,
+            profile_version=None if event.profile_version is None else event.profile_version.value,
+            received_at=event.received_at,
+            sync_status=event.sync_status.value,
+        )
+        return ActuationEventSaveResult(event.with_persistence_id(row.id), True)
+
+    @staticmethod
+    def _to_entity(row: ActuationEventModel) -> ActuationEvent:
+        return ActuationEvent(
+            row.device_id,
+            ActuationAction(row.action),
+            None if row.trigger_metric is None else Metric(row.trigger_metric),
+            None if row.trigger_state is None else EnvironmentalState(row.trigger_state),
+            ActuationResult(row.result),
+            ObservationTime(_as_utc(row.occurred_at)),
+            ProfileVersion.from_optional(row.profile_version),
+            _as_utc(row.received_at),
+            SyncStatus(row.sync_status),
+            row.id,
+        )
 
 
 class MonitoredDeviceRepository:

@@ -4,6 +4,7 @@ Usage::
 
     flask --app app cloud sync
     flask --app app cloud devices
+    flask --app app cloud pending
 """
 import click
 from flask import current_app
@@ -29,6 +30,15 @@ def synchronize() -> None:
     except CloudRequestError as error:
         raise click.ClickException(str(error)) from error
     click.echo(f"Device registry: {len(devices)} device(s) from the cloud")
+
+
+@cloud_cli.command("pending")
+def show_pending() -> None:
+    """Count the readings and actions stored by synchronization status (TS60)."""
+    counts = current_app.extensions["telemetry_service"].pending_counts()
+    for label, key in (("Readings", "readings"), ("Actuation events", "actuation_events")):
+        by_status = ", ".join(f"{status.value} {total}" for status, total in counts[key].items())
+        click.echo(f"{label}: {by_status}")
 
 
 @cloud_cli.command("devices")
