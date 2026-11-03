@@ -116,8 +116,31 @@ qualitrack-edge-service/
 │   └── interfaces/
 ├── shared/
 │   └── infrastructure/
+├── docs/                # technical stories, class diagram, ADRs
 └── tests/
 ```
+
+## Technical Stories
+
+The technical stories are the Edge stories of the QualiTrack Report (epic
+EP07). They describe the contract of the Edge with the nodes and the cloud from
+the perspective of the developer who integrates them, for unattended
+node-to-Edge and Edge-to-cloud interactions.
+
+- Source of truth: [`docs/user-stories.md`](docs/user-stories.md)
+- Story style: `As a ... I want to ... so that ...` with Gherkin acceptance
+  criteria (`Given/When/Then`) and a Requirements Traceability Matrix to the
+  implementation
+- Focus: observable Edge behavior (authentication, validation, local storage,
+  synchronization, configuration), not user interface behavior
+
+### Story-to-Context Mapping
+
+- **IAM bounded context**: `TS53`, `TS54`, and the authentication of `TS55`–`TS59`
+- **Tracking bounded context**: `TS55`, `TS56`, `TS57`, `TS58`, `TS59`, `TS60`,
+  `TS61`, `TS62`, `TS63`, `TS64`
+- **Shared infrastructure**: the cloud session and the background
+  synchronization of `TS61`–`TS64`
 
 ## Technology Stack
 
@@ -485,6 +508,18 @@ A value inside `normal_min`..`normal_max` is `NORMAL`, outside it but inside
 `critical_min`..`critical_max` is `WARNING`, and beyond it is `CRITICAL`; a
 `null` side has no limit. `updated_at` is the last change in the cloud and
 `synced_at` when the Edge copied it.
+
+## Documentation
+
+Additional documentation is available in [`docs/`](docs):
+
+- [`docs/user-stories.md`](docs/user-stories.md): technical stories TS53–TS64
+  with their acceptance criteria and the Requirements Traceability Matrix.
+- [`docs/class-diagram.puml`](docs/class-diagram.puml): PlantUML diagram of the
+  bounded contexts, their layers and relationships, and the composition of the
+  application.
+- [`docs/adrs.md`](docs/adrs.md): architecture decisions and their
+  consequences.
 
 ## Changelog
 
