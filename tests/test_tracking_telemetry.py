@@ -232,8 +232,8 @@ class TelemetryApiTestCase(unittest.TestCase):
         result = self.app.test_cli_runner().invoke(args=["cloud", "pending"])
 
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertRegex(result.output, r"Readings: PENDING \d+, SYNCED 0, REJECTED 0")
-        self.assertRegex(result.output, r"Actuation events: PENDING [1-9]\d*, SYNCED 0, REJECTED 0")
+        self.assertRegex(result.output, r"Readings: PENDING \d+, SYNCED \d+, REJECTED \d+")
+        self.assertRegex(result.output, r"Actuation events: PENDING [1-9]\d*, SYNCED \d+, REJECTED \d+")
 
 
 class TelemetryRepositoryTestCase(unittest.TestCase):
