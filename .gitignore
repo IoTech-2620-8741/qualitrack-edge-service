@@ -1,6 +1,10 @@
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
 .idea/
 .env
+.env.*
+!.env.example
 *.db
+data/
+.DS_Store
