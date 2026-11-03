@@ -4,11 +4,12 @@ They map between the Tracking domain entities and the Peewee models, keeping
 the domain layer free of infrastructure concerns.
 """
 
+import json
 from datetime import UTC, datetime
 
 import peewee
 
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, TelemetryReading
+from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, MonitoredDevice, TelemetryReading
 from tracking.domain.enums import (
     ActuationAction,
     ActuationResult,
@@ -20,8 +21,9 @@ from tracking.domain.enums import (
 )
 from tracking.domain.errors import TelemetryConflict
 from tracking.domain.repositories import ActuationEventSaveResult, TelemetryReadingSaveResult
-from tracking.domain.value_objects import ObservationTime, ProfileVersion
+from tracking.domain.value_objects import ActuationRule, ObservationTime, ProfileVersion, Threshold
 from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
+from tracking.infrastructure.models import EnvironmentalProfile as EnvironmentalProfileModel
 from tracking.infrastructure.models import MonitoredDevice as MonitoredDeviceModel
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
 
@@ -246,4 +248,77 @@ class MonitoredDeviceRepository:
             row.cloud_device_id,
             DeviceStatus(row.status),
             synced_at,
+        )
+
+
+class EnvironmentalProfileRepository:
+    """Persist the local copy of the profiles, with thresholds and rules as JSON."""
+
+    def find_by_device_id(self, device_id: str) -> EnvironmentalProfile | None:
+        """Load the profile a node applies."""
+        row = EnvironmentalProfileModel.get_or_none(EnvironmentalProfileModel.device_id == device_id)
+        return None if row is None else self._to_entity(row)
+
+    def find_all(self) -> list[EnvironmentalProfile]:
+        """Load every profile, ordered by node."""
+        return [
+            self._to_entity(row)
+            for row in EnvironmentalProfileModel.select().order_by(EnvironmentalProfileModel.device_id)
+        ]
+
+    def replace_all(self, profiles: list[EnvironmentalProfile]) -> None:
+        """Make the table equal to the given profiles in one transaction."""
+        rows = [
+            {
+                "device_id": profile.device_id,
+                "version": profile.version.value,
+                "thresholds": json.dumps([self._threshold_to_json(t) for t in profile.thresholds]),
+                "actuation_rules": json.dumps([self._rule_to_json(r) for r in profile.actuation_rules]),
+                "cloud_updated_at": profile.cloud_updated_at,
+                "synced_at": profile.synced_at,
+            }
+            for profile in profiles
+        ]
+        with EnvironmentalProfileModel._meta.database.atomic():
+            EnvironmentalProfileModel.delete().where(
+                EnvironmentalProfileModel.device_id.not_in([row["device_id"] for row in rows])
+            ).execute()
+            if rows:
+                EnvironmentalProfileModel.replace_many(rows).execute()
+
+    @staticmethod
+    def _threshold_to_json(threshold: Threshold) -> dict:
+        return {
+            "metric": threshold.metric.value,
+            "unit": threshold.unit,
+            "normal_min": threshold.normal_min,
+            "normal_max": threshold.normal_max,
+            "critical_min": threshold.critical_min,
+            "critical_max": threshold.critical_max,
+        }
+
+    @staticmethod
+    def _rule_to_json(rule: ActuationRule) -> dict:
+        return {"metric": rule.metric.value, "state": rule.state.value, "action": rule.action.value}
+
+    @staticmethod
+    def _to_entity(row: EnvironmentalProfileModel) -> EnvironmentalProfile:
+        thresholds = [
+            Threshold(
+                Metric(item["metric"]), item["unit"], item["normal_min"], item["normal_max"],
+                item["critical_min"], item["critical_max"],
+            )
+            for item in json.loads(row.thresholds)
+        ]
+        rules = [
+            ActuationRule(Metric(item["metric"]), EnvironmentalState(item["state"]), ActuationAction(item["action"]))
+            for item in json.loads(row.actuation_rules)
+        ]
+        return EnvironmentalProfile(
+            row.device_id,
+            ProfileVersion(row.version),
+            tuple(thresholds),
+            tuple(rules),
+            None if row.cloud_updated_at is None else _as_utc(row.cloud_updated_at),
+            _as_utc(row.synced_at),
         )

@@ -3,7 +3,7 @@
 This module belongs to the infrastructure layer; the domain and application
 layers reach it only through the repositories.
 """
-from peewee import AutoField, CharField, DateTimeField, FloatField, IntegerField, Model
+from peewee import AutoField, CharField, DateTimeField, FloatField, IntegerField, Model, TextField
 
 from shared.infrastructure.database import db
 
@@ -39,6 +39,36 @@ class MonitoredDevice(Model):
 
         database = db
         table_name = "monitored_devices"
+
+
+class EnvironmentalProfile(Model):
+    """ORM mapping for the ``environmental_profiles`` table.
+
+    Each row is the profile a node applies, copied from the cloud (TS64).
+
+    Attributes:
+        device_id (CharField): Natural primary key — the node that applies
+            the profile.
+        version (IntegerField): Version of the profile in the cloud.
+        thresholds (TextField): JSON list of the thresholds of the profile.
+        actuation_rules (TextField): JSON list of the actuation rules.
+        cloud_updated_at (DateTimeField): UTC time of the last change in the
+            cloud, or ``None`` when unknown.
+        synced_at (DateTimeField): UTC time the Edge copied the profile.
+    """
+
+    device_id = CharField(primary_key=True)
+    version = IntegerField()
+    thresholds = TextField()
+    actuation_rules = TextField()
+    cloud_updated_at = DateTimeField(null=True)
+    synced_at = DateTimeField()
+
+    class Meta:
+        """Peewee metadata: binds the model to the shared database and names the table."""
+
+        database = db
+        table_name = "environmental_profiles"
 
 
 class TelemetryReading(Model):
