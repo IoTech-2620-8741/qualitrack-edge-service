@@ -33,10 +33,11 @@ The QualiTrack nodes are:
     (TS57), validated with the rules of the cloud
   - local storage of every reading and action as `PENDING` until the cloud
     accepts it (TS60); a retry of the same observation is not stored twice
+  - synchronization of the pending readings of the environmental device (TS61)
+    and the container monitors (TS62) and of the actions (TS63) with the
+    cloud, oldest first, by the background thread and by `flask cloud sync`
   - SQLite persistence through Peewee
 - **Planned** (technical stories of the QualiTrack Report, epic EP07)
-  - synchronization of readings and actuation events with the cloud (TS61,
-    TS62, TS63)
   - download of the environmental profile of each node from the cloud and
     delivery to the ESP32 (TS64, TS58, TS59)
   - deployment with Docker Compose and Gunicorn on the local station
@@ -172,12 +173,25 @@ flask --app app cloud sync
 flask --app app cloud devices
 ```
 
-`cloud sync` reads now the environmental devices and container monitors of the
-laboratory: the equipment that has a `sensorExternalId` in the cloud.
-`cloud devices` lists the local copy with the environment and cloud identifier
-of each node. While the service runs, a background thread repeats the
-synchronization every `CLOUD_SYNC_INTERVAL_SECONDS`; when the cloud is not
-reachable, the Edge keeps the last copy and retries in the next cycle.
+`cloud sync` runs now what the background thread runs every
+`CLOUD_SYNC_INTERVAL_SECONDS` while the service is up:
+
+1. It reads the environmental devices and container monitors of the
+   laboratory: the equipment that has a `sensorExternalId` in the cloud.
+   `cloud devices` lists this local copy with the environment and cloud
+   identifier of each node.
+2. It sends the pending readings and actions, oldest first, to the cloud route
+   of their node (`/laboratories/{id}/environments/{id}/telemetry-measurements`
+   for the environmental device, and `.../container-monitors/{id}/telemetry-measurements`
+   and `.../actuation-events` for a container monitor).
+   - `201` or `200` (the cloud already had it): the record becomes `SYNCED`.
+   - `400`, `404`, `409` or `422`: the cloud refuses it for good, so it becomes
+     `REJECTED` and the reason is logged.
+   - A node the registry does not place in an environment yet: its records
+     stay `PENDING` until it is.
+   - Cloud not reachable, a server error or a rejected operator account: the
+     synchronization stops, the records keep their state and the next cycle
+     retries them.
 
 ### 5. Register the nodes
 
