@@ -16,6 +16,11 @@ class AppConfig(TypedDict):
     TEST_DEVICE_API_KEY: str | None
     HOST: str
     PORT: int
+    CLOUD_SYNC_ENABLED: bool
+    CLOUD_API_URL: str | None
+    CLOUD_USERNAME: str | None
+    CLOUD_PASSWORD: str | None
+    CLOUD_SYNC_INTERVAL_SECONDS: int | None
 
 
 def _as_bool(name: str, value: str) -> bool:
@@ -77,6 +82,8 @@ def load_config(project_root: Path) -> AppConfig:
     if not host:
         raise ValueError("HOST cannot be empty")
 
+    cloud = _cloud_settings(values, environment_name)
+
     return {
         "APP_ENV": environment_name,
         "DEBUG": debug,
@@ -86,6 +93,48 @@ def load_config(project_root: Path) -> AppConfig:
         "TEST_DEVICE_API_KEY": api_key,
         "HOST": host,
         "PORT": port,
+        **cloud,
+    }
+
+
+def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
+    """Validate the connection with the QualiTrack Cloud REST API.
+
+    The Edge signs in with the account of an operator (report 5.6). The other
+    settings are required only when the synchronization is enabled.
+    """
+    enabled = _as_bool("CLOUD_SYNC_ENABLED", _required(values, "CLOUD_SYNC_ENABLED"))
+    if not enabled:
+        return {
+            "CLOUD_SYNC_ENABLED": False,
+            "CLOUD_API_URL": None,
+            "CLOUD_USERNAME": None,
+            "CLOUD_PASSWORD": None,
+            "CLOUD_SYNC_INTERVAL_SECONDS": None,
+        }
+
+    url = _required(values, "CLOUD_API_URL").strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("CLOUD_API_URL must be an http or https URL")
+    if environment_name == "production" and not url.startswith("https://"):
+        raise ValueError("CLOUD_API_URL must use https in production")
+    username = _required(values, "CLOUD_USERNAME").strip()
+    password = _required(values, "CLOUD_PASSWORD")
+    if not username or not password:
+        raise ValueError("CLOUD_USERNAME and CLOUD_PASSWORD are required when the cloud synchronization is enabled")
+    interval_setting = _required(values, "CLOUD_SYNC_INTERVAL_SECONDS")
+    try:
+        interval = int(interval_setting)
+    except ValueError as error:
+        raise ValueError("CLOUD_SYNC_INTERVAL_SECONDS must be an integer") from error
+    if interval < 1:
+        raise ValueError("CLOUD_SYNC_INTERVAL_SECONDS must be at least 1")
+    return {
+        "CLOUD_SYNC_ENABLED": True,
+        "CLOUD_API_URL": url,
+        "CLOUD_USERNAME": username,
+        "CLOUD_PASSWORD": password,
+        "CLOUD_SYNC_INTERVAL_SECONDS": interval,
     }
 
 def _required(values: dict[str, str], name: str) -> str:
