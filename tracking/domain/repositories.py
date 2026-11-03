@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, TelemetryReading
+from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, MonitoredDevice, TelemetryReading
 from tracking.domain.enums import SyncStatus
 
 
@@ -20,6 +20,22 @@ class MonitoredDeviceRepository(Protocol):
 
     def replace_all(self, devices: list[MonitoredDevice]) -> None:
         """Make the local copy equal to the devices the cloud registers."""
+        ...
+
+
+class EnvironmentalProfileRepository(Protocol):
+    """Persistence contract for the local copy of the profiles of the nodes."""
+
+    def find_by_device_id(self, device_id: str) -> EnvironmentalProfile | None:
+        """Load the profile a node applies."""
+        ...
+
+    def find_all(self) -> list[EnvironmentalProfile]:
+        """Load every profile, ordered by node."""
+        ...
+
+    def replace_all(self, profiles: list[EnvironmentalProfile]) -> None:
+        """Make the local copy equal to the profiles the cloud has now."""
         ...
 
 
