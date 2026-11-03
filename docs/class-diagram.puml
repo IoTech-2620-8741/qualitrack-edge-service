@@ -231,8 +231,8 @@ package "Tracking Bounded Context" #DEEAFF {
     }
 
     class DeviceRegistryApplicationService {
-      +__init__(registry_gateway, monitored_device_repository=None)
-      +synchronize_registry(): list[MonitoredDevice]
+      +__init__(registry_gateway, iam_anti_corruption_layer, monitored_device_repository=None)
+      +synchronize_registry(): RegistrySynchronization
       +monitored_devices(): list[MonitoredDevice]
     }
 
@@ -270,6 +270,7 @@ package "Tracking Bounded Context" #DEEAFF {
     class IamAntiCorruptionLayer {
       +__init__(iam_authentication_service)
       +authenticated_reporting_device(device_id, credential): ReportingDevice | None
+      +registered_device_ids(): set[str]
     }
   }
 
@@ -401,6 +402,7 @@ TelemetryApplicationService ..> DeviceAuthenticationFailed : raises
 TelemetryApplicationService ..> DeviceTypeNotAllowed : raises
 
 DeviceRegistryApplicationService --> IDeviceRegistryGateway
+DeviceRegistryApplicationService --> IamAntiCorruptionLayer : keeps only the nodes of this Edge
 DeviceRegistryApplicationService --> IMonitoredDeviceRepository
 EnvironmentalProfileApplicationService --> IProfileGateway
 EnvironmentalProfileApplicationService --> IamAntiCorruptionLayer
