@@ -69,6 +69,12 @@ class FakeCloudHandler(BaseHTTPRequestHandler):
             "type": "ENVIRONMENTAL_DEVICE", "model": "ESP32-WROOM-32", "serialNumber": "24:6F:28:AA:10:01",
             "status": "OPERATIONAL", "deviceType": "ENVIRONMENTAL_DEVICE", "sensorExternalId": "ENV-001",
             "firmwareVersion": "1.0.3",
+        }, {
+            # A node of another environment that another station serves.
+            "id": 30, "laboratoryId": 7, "environmentId": 9, "name": "Cold room monitor",
+            "type": "CONTAINER_MONITOR", "model": "ESP32-WROOM-32", "serialNumber": "24:6F:28:AA:10:09",
+            "status": "OPERATIONAL", "deviceType": "CONTAINER_MONITOR", "sensorExternalId": "CNT-OTHER",
+            "firmwareVersion": "1.0.3",
         }])
 
     def _answer(self, status, body):
@@ -111,9 +117,14 @@ class CloudOverHttpTestCase(unittest.TestCase):
             MonitoredDeviceRepository().replace_all([])
             EnvironmentalProfileRepository().replace_all([])
 
+    def layer(self):
+        return self.app.extensions["environmental_profile_service"].iam_anti_corruption_layer
+
     def service(self, password):
         session = CloudSession(self.base_url, "edge.operator@lab.pe", password)
-        return DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session), MonitoredDeviceRepository())
+        return DeviceRegistryApplicationService(
+            CloudDeviceRegistryGateway(session), self.layer(), MonitoredDeviceRepository()
+        )
 
     def test_the_sync_command_sends_what_the_nodes_sent_to_the_edge(self):
         client = self.app.test_client()
@@ -124,9 +135,9 @@ class CloudOverHttpTestCase(unittest.TestCase):
                                      "measured_at": (measured_at + timedelta(minutes=minutes)).isoformat()})
             self.assertEqual(sent.status_code, 201)
         session = CloudSession(self.base_url, "edge.operator@lab.pe", "local-secret")
-        layer = self.app.extensions["environmental_profile_service"].iam_anti_corruption_layer
+        layer = self.layer()
         services = {
-            "device_registry_service": DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session)),
+            "device_registry_service": DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session), layer),
             "environmental_profile_service": EnvironmentalProfileApplicationService(
                 CloudProfileGateway(session), layer),
             "telemetry_synchronization_service": TelemetrySynchronizationApplicationService(
@@ -142,8 +153,12 @@ class CloudOverHttpTestCase(unittest.TestCase):
             self.app.extensions.update(previous)
 
         self.assertEqual(first.exit_code, 0, first.output)
-        self.assertIn("Device registry: 1 device(s) from the cloud", first.output)
+        self.assertIn("Device registry: 1 device(s) of this Edge from the cloud", first.output)
         self.assertIn("Environmental profiles: 1 profile(s) from the cloud", first.output)
+        profile_requests = [path for method, path, _, _ in FakeCloudHandler.received
+                            if path.endswith("/environmental-profile")]
+        self.assertEqual(set(profile_requests),
+                         {"/api/v1/laboratories/7/environments/2/devices/15/environmental-profile"})
         self.assertIn("Readings: 1 synced, 1 rejected, 0 waiting", first.output)
         self.assertIn("Readings: 0 synced, 0 rejected, 0 waiting", second.output)
         telemetry = [(body, authorization) for method, path, body, authorization in FakeCloudHandler.received
@@ -170,12 +185,14 @@ class CloudOverHttpTestCase(unittest.TestCase):
     def test_reads_the_registry_over_http_with_the_operator_token(self):
         with self.app.app_context():
             try:
-                devices = self.service("local-secret").synchronize_registry()
+                registry = self.service("local-secret").synchronize_registry()
                 stored = MonitoredDeviceRepository().find_by_device_id("ENV-001")
+                other_station = MonitoredDeviceRepository().find_by_device_id("CNT-OTHER")
             finally:
                 MonitoredDeviceRepository().replace_all([])
 
-        self.assertEqual([device.device_id for device in devices], ["ENV-001"])
+        self.assertEqual([device.device_id for device in registry.devices], ["ENV-001"])
+        self.assertIsNone(other_station)
         self.assertEqual((stored.laboratory_id, stored.environment_id, stored.cloud_device_id), (7, 2, 15))
         self.assertEqual(
             [(method, path, authorization) for method, path, _, authorization in FakeCloudHandler.received],
@@ -190,7 +207,7 @@ class CloudOverHttpTestCase(unittest.TestCase):
         try:
             result = self.app.test_cli_runner().invoke(args=["cloud", "sync"])
         finally:
-            self.app.extensions["device_registry_service"] = DeviceRegistryApplicationService(None)
+            self.app.extensions["device_registry_service"] = DeviceRegistryApplicationService(None, self.layer())
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn("The cloud rejected the operator credentials", result.output)

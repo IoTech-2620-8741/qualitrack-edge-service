@@ -267,7 +267,7 @@ class ActuationEvent:
 
 @dataclass(frozen=True)
 class MonitoredDevice:
-    """A node the cloud registers for the laboratory of the Edge.
+    """A node of this Edge as the cloud registers it for the laboratory.
 
     It keeps the cloud identifiers its telemetry is synchronized to: the
     laboratory, the environment where the node is installed and the equipment
