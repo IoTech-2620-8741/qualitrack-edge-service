@@ -21,11 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - IAM (iam): `flask devices` commands to register a node with a generated API key shown only once, rotate its key, revoke it and list the nodes (#2).
 
+- Shared (shared): session with the QualiTrack Cloud REST API with the account of an operator, which signs in again when the token expires, and a background thread that runs the cloud synchronization every `CLOUD_SYNC_INTERVAL_SECONDS` (#3).
+
+- Tracking (tracking): local copy of the device registry of the laboratory, with the environment and cloud identifier of each node, read from the equipment of the cloud by the background thread and by `flask cloud sync`, and listed by `flask cloud devices` (#3).
+
 ### Changed
 
 - IAM (iam): the device types and the device identifier follow the cloud registry: `ENVIRONMENTAL_DEVICE` instead of `ENVIRONMENT_MONITOR`, and the `sensorExternalId` of the node (for example `ENV-001`) instead of its MAC address (#1).
 
 - The dependencies file is `requirements.txt` (#1).
+
+- The configuration requires `CLOUD_SYNC_ENABLED`, and the other `CLOUD_*` settings when it is true (#3).
 
 ### Removed
 

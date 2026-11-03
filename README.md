@@ -22,6 +22,11 @@ The QualiTrack nodes are:
     rotate their key, revoke them and list them
   - API keys stored as salted PBKDF2 verifiers
   - optional registration of a development test node
+  - connection with the QualiTrack Cloud REST API with the account of an
+    operator, signing in again when the token expires
+  - local copy of the device registry of the laboratory (environment and cloud
+    identifiers of each node), refreshed by a background thread and by
+    `flask cloud sync`
   - SQLite persistence through Peewee
 - **Planned** (technical stories of the QualiTrack Report, epic EP07)
   - reception of environmental and container readings and of actuation events
@@ -45,14 +50,23 @@ Identifies the ESP32 nodes and validates their credentials.
 
 ### Tracking
 
-Will receive the telemetry and actuation events of the nodes, keep them until
-they are synchronized with the cloud, and keep the environmental profile each
-node applies. It is the Edge counterpart of the Tracking & Telemetry bounded
-context of the cloud platform.
+Synchronizes the Edge with the cloud. It is the Edge counterpart of the
+Tracking & Telemetry bounded context of the cloud platform.
+
+- **Core concept**: `MonitoredDevice`, a node the cloud registers for the
+  laboratory, with its environment and the cloud identifiers its telemetry is
+  synchronized to.
+- **Cloud gateway**: `CloudDeviceRegistryGateway` reads the equipment of the
+  laboratory and translates the IoT devices into `MonitoredDevice`.
+- **Next**: it will receive the telemetry and actuation events of the nodes,
+  keep them until they are synchronized, and keep the environmental profile
+  each node applies.
 
 ### Shared
 
-Infrastructure shared by the bounded contexts, such as the SQLite database.
+Infrastructure shared by the bounded contexts: the SQLite database, the
+authenticated session with the cloud and the background synchronization
+thread.
 
 ## Layered Architecture
 
@@ -127,8 +141,35 @@ settings and does not supply defaults for missing ones.
 | `TEST_DEVICE_API_KEY` | Local-only API key of the test node; required when seeding is enabled |
 | `HOST` | Address the service listens on; `0.0.0.0` lets the nodes of the local network reach it |
 | `PORT` | Port the service listens on |
+| `CLOUD_SYNC_ENABLED` | Connects the Edge with the QualiTrack Cloud REST API |
+| `CLOUD_API_URL` | Base URL of the cloud, without `/api/v1`; it must use `https` in production |
+| `CLOUD_USERNAME` | E-mail of the operator account the Edge signs in with |
+| `CLOUD_PASSWORD` | Password of that account; keep it out of version control |
+| `CLOUD_SYNC_INTERVAL_SECONDS` | Seconds between two synchronizations of the background thread |
 
-### 4. Register the nodes
+The cloud settings other than `CLOUD_SYNC_ENABLED` are required only when the
+synchronization is enabled.
+
+### 4. Connect the Edge with the cloud
+
+The Edge signs in to the cloud with the account of an operator of the
+laboratory. Create that account in QualiTrack and sign in once to change its
+first password; the laboratory also needs an active subscription. Then set the
+`CLOUD_*` settings and check the connection:
+
+```sh
+flask --app app cloud sync
+flask --app app cloud devices
+```
+
+`cloud sync` reads now the environmental devices and container monitors of the
+laboratory: the equipment that has a `sensorExternalId` in the cloud.
+`cloud devices` lists the local copy with the environment and cloud identifier
+of each node. While the service runs, a background thread repeats the
+synchronization every `CLOUD_SYNC_INTERVAL_SECONDS`; when the cloud is not
+reachable, the Edge keeps the last copy and retries in the next cycle.
+
+### 5. Register the nodes
 
 Register each ESP32 with the identifier the cloud registers for it
 (`sensorExternalId`) and its type. The command generates a random API key and
@@ -145,16 +186,18 @@ flask --app app devices list
 invalidates the previous one. `flask --app app devices revoke <device_id>`
 stops a node from signing in. These operations are not exposed over HTTP.
 
-### 5. Run the service
+### 6. Run the service
 
 ```sh
 APP_ENV=development python app.py
 ```
 
-The built-in Flask server is for development only. Production must run behind
-a production WSGI server.
+`python app.py` also starts the background synchronization with the cloud;
+`flask` commands never start it. The built-in Flask server is for development
+only. Production must run behind a production WSGI server with a single worker
+process, as SQLite and the synchronization thread expect.
 
-### 6. Run the tests
+### 7. Run the tests
 
 ```sh
 python -m unittest -v

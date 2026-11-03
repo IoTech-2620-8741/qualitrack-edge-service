@@ -16,4 +16,5 @@ os.environ.update({
     "TEST_DEVICE_API_KEY": "test-only-key",
     "HOST": "127.0.0.1",
     "PORT": "5000",
+    "CLOUD_SYNC_ENABLED": "false",
 })
