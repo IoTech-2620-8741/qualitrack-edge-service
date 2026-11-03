@@ -6,12 +6,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app import create_app
 from shared.infrastructure.cloud_session import CloudSession
-from tracking.application.services import DeviceRegistryApplicationService, TelemetrySynchronizationApplicationService
+from tracking.application.services import (
+    DeviceRegistryApplicationService,
+    EnvironmentalProfileApplicationService,
+    TelemetrySynchronizationApplicationService,
+)
+from tracking.infrastructure.cloud_profile_gateway import CloudProfileGateway
 from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
 from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
-from tracking.infrastructure.repositories import MonitoredDeviceRepository
+from tracking.infrastructure.repositories import EnvironmentalProfileRepository, MonitoredDeviceRepository
 
 _ENVIRONMENT_TELEMETRY = "/api/v1/laboratories/7/environments/2/telemetry-measurements"
 
@@ -50,6 +55,13 @@ class FakeCloudHandler(BaseHTTPRequestHandler):
         self.received.append(("GET", self.path, None, self.headers.get("Authorization")))
         if self.headers.get("Authorization") != "Bearer jwt-token":
             return self._answer(401, {"message": "Unauthorized"})
+        if self.path == "/api/v1/laboratories/7/environments/2/devices/15/environmental-profile":
+            return self._answer(200, {
+                "id": 4, "scope": "ENVIRONMENT", "laboratoryId": 7, "environmentId": 2, "deviceId": None,
+                "version": 5, "updatedAt": "2026-11-03T14:00:00Z", "updatedBy": 3, "actuationRules": [],
+                "thresholds": [{"metric": "AIR_QUALITY", "unit": "ppm", "normalMin": None, "normalMax": 800.0,
+                                "criticalMin": None, "criticalMax": 1200.0}],
+            })
         if self.path != "/api/v1/laboratories/7/equipments":
             return self._answer(404, {"message": "Not found"})
         self._answer(200, [{
@@ -97,6 +109,7 @@ class CloudOverHttpTestCase(unittest.TestCase):
             TelemetryReadingModel.delete().execute()
             ActuationEventModel.delete().execute()
             MonitoredDeviceRepository().replace_all([])
+            EnvironmentalProfileRepository().replace_all([])
 
     def service(self, password):
         session = CloudSession(self.base_url, "edge.operator@lab.pe", password)
@@ -111,8 +124,11 @@ class CloudOverHttpTestCase(unittest.TestCase):
                                      "measured_at": (measured_at + timedelta(minutes=minutes)).isoformat()})
             self.assertEqual(sent.status_code, 201)
         session = CloudSession(self.base_url, "edge.operator@lab.pe", "local-secret")
+        layer = self.app.extensions["environmental_profile_service"].iam_anti_corruption_layer
         services = {
             "device_registry_service": DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session)),
+            "environmental_profile_service": EnvironmentalProfileApplicationService(
+                CloudProfileGateway(session), layer),
             "telemetry_synchronization_service": TelemetrySynchronizationApplicationService(
                 CloudTelemetryGateway(session)),
         }
@@ -127,6 +143,7 @@ class CloudOverHttpTestCase(unittest.TestCase):
 
         self.assertEqual(first.exit_code, 0, first.output)
         self.assertIn("Device registry: 1 device(s) from the cloud", first.output)
+        self.assertIn("Environmental profiles: 1 profile(s) from the cloud", first.output)
         self.assertIn("Readings: 1 synced, 1 rejected, 0 waiting", first.output)
         self.assertIn("Readings: 0 synced, 0 rejected, 0 waiting", second.output)
         telemetry = [(body, authorization) for method, path, body, authorization in FakeCloudHandler.received
@@ -139,6 +156,16 @@ class CloudOverHttpTestCase(unittest.TestCase):
         with self.app.app_context():
             statuses = [row.sync_status for row in TelemetryReadingModel.select().order_by(TelemetryReadingModel.id)]
         self.assertEqual(statuses, ["SYNCED", "REJECTED"])
+
+        configuration = client.get("/api/v1/configurations/ENV-001", headers={"X-API-Key": "test-only-key"})
+        self.assertEqual(configuration.status_code, 200)
+        self.assertEqual(configuration.json["profile_version"], 5)
+        self.assertEqual(configuration.json["device_type"], "ENVIRONMENTAL_DEVICE")
+        self.assertEqual(configuration.json["thresholds"], [{
+            "metric": "AIR_QUALITY", "unit": "ppm", "normal_min": None, "normal_max": 800.0,
+            "critical_min": None, "critical_max": 1200.0,
+        }])
+        self.assertEqual(configuration.json["updated_at"], "2026-11-03T14:00:00Z")
 
     def test_reads_the_registry_over_http_with_the_operator_token(self):
         with self.app.app_context():

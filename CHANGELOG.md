@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tracking (tracking): the pending readings of the environmental device (TS61) and the container monitors (TS62) and the actions (TS63) are sent oldest first to the nested routes of the cloud by the background thread and by `flask cloud sync`. The cloud's acceptance makes them `SYNCED` and its refusal `REJECTED`; records of a node the registry does not place in an environment wait (#5).
 
+- Tracking (tracking): local copy of the environmental profile of each node (version, thresholds and actuation rules), read from the cloud by the background thread and by `flask cloud sync` (TS64) and listed by `flask cloud profiles` (#6).
+
+- Tracking (tracking): `GET /api/v1/configurations/{deviceId}` hands the environmental device (TS58) and the container monitor (TS59) the profile they apply (#6).
+
 ### Changed
 
 - IAM (iam): the device types and the device identifier follow the cloud registry: `ENVIRONMENTAL_DEVICE` instead of `ENVIRONMENT_MONITOR`, and the `sensorExternalId` of the node (for example `ENV-001`) instead of its MAC address (#1).
@@ -40,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The configuration requires `CLOUD_SYNC_ENABLED`, and the other `CLOUD_*` settings when it is true (#3).
 
 - Tracking (tracking): `flask cloud sync` also sends the pending telemetry after reading the device registry (#5).
+
+- Tracking (tracking): `flask cloud sync` also copies the profiles, between the device registry and the pending telemetry (#6).
 
 ### Removed
 

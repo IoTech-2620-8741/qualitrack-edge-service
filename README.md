@@ -36,10 +36,11 @@ The QualiTrack nodes are:
   - synchronization of the pending readings of the environmental device (TS61)
     and the container monitors (TS62) and of the actions (TS63) with the
     cloud, oldest first, by the background thread and by `flask cloud sync`
+  - local copy of the environmental profile of each node, read from the cloud
+    (TS64), and its delivery to the environmental device (TS58) and the
+    container monitor (TS59) at `GET /api/v1/configurations/{deviceId}`
   - SQLite persistence through Peewee
 - **Planned** (technical stories of the QualiTrack Report, epic EP07)
-  - download of the environmental profile of each node from the cloud and
-    delivery to the ESP32 (TS64, TS58, TS59)
   - deployment with Docker Compose and Gunicorn on the local station
 
 ## Bounded Contexts
@@ -61,12 +62,16 @@ counterpart of the Tracking & Telemetry bounded context of the cloud platform.
 - **Core concepts**: `TelemetryReading` (one metric a node measured at a
   moment) and `ActuationEvent` (an action of a container monitor), each with
   its synchronization status; `MonitoredDevice`, a node the cloud registers for
-  the laboratory, with the cloud identifiers its telemetry is synchronized to.
+  the laboratory, with the cloud identifiers its telemetry is synchronized to;
+  `EnvironmentalProfile`, the thresholds and actuation rules a node applies,
+  with the version of the cloud.
 - **Anti-corruption layer**: `IamAntiCorruptionLayer` translates IAM's
   authentication into Tracking's own `ReportingDevice`, so Tracking does not
   depend on IAM's model.
-- **Cloud gateway**: `CloudDeviceRegistryGateway` reads the equipment of the
-  laboratory and translates the IoT devices into `MonitoredDevice`.
+- **Cloud gateways**: `CloudDeviceRegistryGateway` reads the equipment of the
+  laboratory, `CloudProfileGateway` the profile of each node and
+  `CloudTelemetryGateway` sends the pending readings and actions. Each one
+  translates the resources of the cloud into Tracking concepts.
 
 ### Shared
 
@@ -171,6 +176,7 @@ first password; the laboratory also needs an active subscription. Then set the
 ```sh
 flask --app app cloud sync
 flask --app app cloud devices
+flask --app app cloud profiles
 ```
 
 `cloud sync` runs now what the background thread runs every
@@ -180,7 +186,14 @@ flask --app app cloud devices
    laboratory: the equipment that has a `sensorExternalId` in the cloud.
    `cloud devices` lists this local copy with the environment and cloud
    identifier of each node.
-2. It sends the pending readings and actions, oldest first, to the cloud route
+2. It copies the environmental profile of every node placed in an
+   environment (`/laboratories/{id}/environments/{id}/devices/{id}/environmental-profile`):
+   the profile of the environment for the environmental device, and the
+   profile of the container monitor for a container monitor. A node without a
+   profile in the cloud has none in the Edge. The copy changes only when every
+   profile was read, so the nodes keep the last one while the cloud is
+   unreachable. `cloud profiles` lists it.
+3. It sends the pending readings and actions, oldest first, to the cloud route
    of their node (`/laboratories/{id}/environments/{id}/telemetry-measurements`
    for the environmental device, and `.../container-monitors/{id}/telemetry-measurements`
    and `.../actuation-events` for a container monitor).
@@ -372,6 +385,44 @@ least one. The response has the same shape as the environmental one.
 - `result` (optional): `EXECUTED` (default) or `FAILED`.
 
 The response is the stored action with its `id` and `sync_status`.
+
+### Read the configuration of a node (TS58, TS59)
+
+`GET /api/v1/configurations/{deviceId}`
+
+Header: `X-API-Key: <node api key>`. The node reads its own configuration: the
+profile of its environment for the environmental device, or its own profile
+for a container monitor, as the Edge last copied it from the cloud. The node
+applies the thresholds and rules and sends `profile_version` back with its
+readings and actions.
+
+| Response | When |
+|---|---|
+| `200 OK` | the configuration of the node |
+| `401 Unauthorized` | missing or invalid API key, or unknown or revoked node |
+| `404 Not Found` | the Edge has no profile of the cloud for the node yet |
+
+```json
+{
+  "device_id": "CNT-001",
+  "device_type": "CONTAINER_MONITOR",
+  "profile_version": 3,
+  "thresholds": [
+    {"metric": "TEMPERATURE", "unit": "°C", "normal_min": 15.0, "normal_max": 25.0,
+     "critical_min": 8.0, "critical_max": 30.0}
+  ],
+  "actuation_rules": [
+    {"metric": "TEMPERATURE", "state": "WARNING", "action": "VENTILATION_ON"}
+  ],
+  "updated_at": "2026-11-03T14:00:00Z",
+  "synced_at": "2026-11-03T15:00:00Z"
+}
+```
+
+A value inside `normal_min`..`normal_max` is `NORMAL`, outside it but inside
+`critical_min`..`critical_max` is `WARNING`, and beyond it is `CRITICAL`; a
+`null` side has no limit. `updated_at` is the last change in the cloud and
+`synced_at` when the Edge copied it.
 
 ## Changelog
 

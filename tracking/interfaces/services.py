@@ -1,12 +1,13 @@
 """Interface (REST API) layer for the Tracking bounded context.
 
 Exposes a Flask Blueprint (``tracking_api``) that receives the readings and
-actions of the nodes (TS55, TS56, TS57), translates them into calls to the
-application service and maps the results back to JSON responses. This layer
-owns no domain logic.
+actions of the nodes (TS55, TS56, TS57) and hands each node its configuration
+(TS58, TS59). It translates the requests into calls to the application
+services and maps the results back to JSON responses. This layer owns no
+domain logic.
 
-Each request carries the ``device_id`` of the node in the body and its API key
-in the ``X-API-Key`` header. Responses: ``201`` when something new is stored,
+Each telemetry request carries the ``device_id`` of the node in the body and
+its API key in the ``X-API-Key`` header. Responses: ``201`` when something new is stored,
 ``200`` for an identical retry, ``400`` for invalid data, ``401`` for missing
 or rejected credentials, ``403`` when the node type does not send that
 telemetry, ``409`` when a retry changes a stored observation and ``415`` for a
@@ -15,7 +16,11 @@ non-JSON request.
 from flask import Blueprint, current_app, jsonify, request
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
-from tracking.application.errors import DeviceAuthenticationFailed, DeviceTypeNotAllowed
+from tracking.application.errors import (
+    ConfigurationNotAvailable,
+    DeviceAuthenticationFailed,
+    DeviceTypeNotAllowed,
+)
 from tracking.domain.enums import (
     ActuationAction,
     ActuationResult,
@@ -194,3 +199,51 @@ def create_actuation_event():
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     return jsonify(_event_resource(result.event)), 201 if result.created else 200
+
+
+def _configuration_resource(configuration) -> dict:
+    profile = configuration.profile
+    return {
+        "device_id": profile.device_id,
+        "device_type": configuration.device_type.value,
+        "profile_version": profile.version.value,
+        "thresholds": [
+            {
+                "metric": threshold.metric.value,
+                "unit": threshold.unit,
+                "normal_min": threshold.normal_min,
+                "normal_max": threshold.normal_max,
+                "critical_min": threshold.critical_min,
+                "critical_max": threshold.critical_max,
+            }
+            for threshold in profile.thresholds
+        ],
+        "actuation_rules": [
+            {"metric": rule.metric.value, "state": rule.state.value, "action": rule.action.value}
+            for rule in profile.actuation_rules
+        ],
+        "updated_at": None if profile.cloud_updated_at is None else _iso(profile.cloud_updated_at),
+        "synced_at": _iso(profile.synced_at),
+    }
+
+
+@tracking_api.route("/api/v1/configurations/<device_id>", methods=["GET"])
+def get_configuration(device_id: str):
+    """Hand a node the profile it applies (TS58 for the environmental device, TS59 for a container monitor).
+
+    The node identifies itself with its ``device_id`` in the path and its API
+    key in the ``X-API-Key`` header, so it can only read its own
+    configuration. Responses: ``200`` with the thresholds, the actuation rules
+    and the profile version; ``401`` for missing or rejected credentials;
+    ``404`` while the Edge has no profile of the cloud for the node.
+    """
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        return jsonify({"error": "Missing X-API-Key"}), 401
+    try:
+        configuration = current_app.extensions["environmental_profile_service"].configuration_for(device_id, api_key)
+    except DeviceAuthenticationFailed:
+        return jsonify({"error": "Invalid device_id or API key"}), 401
+    except ConfigurationNotAvailable:
+        return jsonify({"error": "The Edge has no profile of the cloud for this device yet"}), 404
+    return jsonify(_configuration_resource(configuration)), 200

@@ -10,11 +10,18 @@ from datetime import UTC, datetime
 
 from tracking.application.errors import (
     CloudSynchronizationDisabled,
+    ConfigurationNotAvailable,
     DeviceAuthenticationFailed,
     DeviceTypeNotAllowed,
 )
-from tracking.application.gateways import DeviceRegistryGateway, TelemetryGateway
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, ReportingDevice, TelemetryReading
+from tracking.application.gateways import DeviceRegistryGateway, ProfileGateway, TelemetryGateway
+from tracking.domain.entities import (
+    ActuationEvent,
+    EnvironmentalProfile,
+    MonitoredDevice,
+    ReportingDevice,
+    TelemetryReading,
+)
 from tracking.domain.enums import (
     ActuationAction,
     ActuationResult,
@@ -26,12 +33,14 @@ from tracking.domain.enums import (
 from tracking.domain.repositories import (
     ActuationEventRepository,
     ActuationEventSaveResult,
+    EnvironmentalProfileRepository,
     MonitoredDeviceRepository,
     TelemetryReadingRepository,
     TelemetryReadingSaveResult,
 )
 from tracking.infrastructure.repositories import (
     ActuationEventRepository as ActuationEventRepositoryImpl,
+    EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
     MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl,
     TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
 )
@@ -281,3 +290,80 @@ class TelemetrySynchronizationApplicationService:
                 else:
                     rejected += 1
         return SynchronizationSummary(synced, rejected, waiting)
+
+
+@dataclass(frozen=True)
+class NodeConfiguration:
+    """The configuration a node reads from the Edge: its type and the profile it applies."""
+
+    device_type: DeviceType
+    profile: EnvironmentalProfile
+
+
+class EnvironmentalProfileApplicationService:
+    """Keep the profile of each node and hand it to the node (TS64, TS58, TS59).
+
+    The profiles are copied from the cloud for every node the registry places
+    in an environment; the copy changes only when every profile was read, so
+    the nodes keep the last one while the cloud is unreachable.
+    """
+
+    def __init__(
+        self,
+        profile_gateway: ProfileGateway | None,
+        iam_anti_corruption_layer: IamAntiCorruptionLayer,
+        monitored_device_repository: MonitoredDeviceRepository | None = None,
+        environmental_profile_repository: EnvironmentalProfileRepository | None = None,
+    ):
+        """Initialize the service; without a gateway the cloud synchronization is disabled."""
+        self.profile_gateway = profile_gateway
+        self.iam_anti_corruption_layer = iam_anti_corruption_layer
+        self.monitored_device_repository = (
+            monitored_device_repository or MonitoredDeviceRepositoryImpl()
+        )
+        self.environmental_profile_repository = (
+            environmental_profile_repository or EnvironmentalProfileRepositoryImpl()
+        )
+
+    def synchronize_profiles(self) -> list[EnvironmentalProfile]:
+        """Copy the profile of every node the registry places in an environment (TS64).
+
+        A node without a profile in the cloud loses its local copy, as does a
+        node the registry no longer has.
+
+        Raises:
+            CloudSynchronizationDisabled: The Edge has no connection with the
+                cloud configured.
+            shared.infrastructure.cloud_session.CloudRequestError: The cloud
+                could not answer; the previous copy is kept.
+        """
+        if self.profile_gateway is None:
+            raise CloudSynchronizationDisabled
+        profiles = []
+        for device in self.monitored_device_repository.find_all():
+            if not device.is_in_environment:
+                continue
+            profile = self.profile_gateway.fetch_profile(device)
+            if profile is not None:
+                profiles.append(profile)
+        self.environmental_profile_repository.replace_all(profiles)
+        return profiles
+
+    def configuration_for(self, device_id: str, api_key: str) -> NodeConfiguration:
+        """Return the configuration a node applies (TS58, TS59).
+
+        Raises:
+            DeviceAuthenticationFailed: IAM rejects the node's credentials.
+            ConfigurationNotAvailable: The Edge has no profile for the node yet.
+        """
+        reporting_device = self.iam_anti_corruption_layer.authenticated_reporting_device(device_id, api_key)
+        if reporting_device is None:
+            raise DeviceAuthenticationFailed
+        profile = self.environmental_profile_repository.find_by_device_id(reporting_device.device_id)
+        if profile is None:
+            raise ConfigurationNotAvailable
+        return NodeConfiguration(reporting_device.device_type, profile)
+
+    def profiles(self) -> list[EnvironmentalProfile]:
+        """Return the local copy of the profiles, ordered by node."""
+        return self.environmental_profile_repository.find_all()

@@ -76,6 +76,11 @@ class ActuationAction(str, Enum):
     SERVO_OPEN = "SERVO_OPEN"
     SERVO_CLOSE = "SERVO_CLOSE"
 
+    @property
+    def is_activation(self) -> bool:
+        """Whether the action starts a response, the only kind a rule of the profile requests."""
+        return self in (ActuationAction.VENTILATION_ON, ActuationAction.COOLING_ON, ActuationAction.SERVO_OPEN)
+
 
 class ActuationResult(str, Enum):
     """Outcome of an action of the container monitor."""

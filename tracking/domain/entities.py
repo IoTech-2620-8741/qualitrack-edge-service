@@ -2,7 +2,9 @@
 
 ``ReportingDevice`` is Tracking's local representation of a node that signed
 in. ``TelemetryReading`` and ``ActuationEvent`` are the observations the Edge
-keeps until the cloud accepts them (TS60).
+keeps until the cloud accepts them (TS60). ``MonitoredDevice`` and
+``EnvironmentalProfile`` are local copies of what the cloud registers for each
+node.
 """
 
 from dataclasses import dataclass, replace
@@ -18,7 +20,7 @@ from tracking.domain.enums import (
     Metric,
     SyncStatus,
 )
-from tracking.domain.value_objects import ObservationTime, ProfileVersion
+from tracking.domain.value_objects import ActuationRule, ObservationTime, ProfileVersion, Threshold
 
 _MAX_TEXT_LENGTH = 120
 
@@ -312,3 +314,50 @@ class MonitoredDevice:
     def is_in_environment(self) -> bool:
         """Whether the cloud has associated the node with an environment."""
         return self.environment_id is not None
+
+
+@dataclass(frozen=True)
+class EnvironmentalProfile:
+    """The configuration a node applies, copied from the cloud (TS64).
+
+    It is the profile of the environment for the environmental device, or the
+    profile of the container monitor. Each change in the cloud creates a new
+    version, which the node reports back with its readings and actions.
+
+    Attributes:
+        device_id: Node that applies the profile.
+        version: Version of the profile in the cloud.
+        thresholds: Ranges of each metric, at most one per metric.
+        actuation_rules: Actions a container monitor starts; each one needs a
+            threshold of its metric.
+        cloud_updated_at: Last change of the profile in the cloud, if known.
+        synced_at: When the Edge copied the profile, in UTC.
+    """
+
+    device_id: str
+    version: ProfileVersion
+    thresholds: tuple[Threshold, ...]
+    actuation_rules: tuple[ActuationRule, ...]
+    cloud_updated_at: datetime | None
+    synced_at: datetime
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.device_id, str) or not self.device_id.strip():
+            raise ValueError("Device identifier cannot be empty")
+        if not isinstance(self.version, ProfileVersion):
+            raise TypeError("Environmental profile requires a ProfileVersion")
+        object.__setattr__(self, "thresholds", tuple(self.thresholds))
+        object.__setattr__(self, "actuation_rules", tuple(self.actuation_rules))
+        if not all(isinstance(threshold, Threshold) for threshold in self.thresholds):
+            raise TypeError("Environmental profile thresholds must be Threshold values")
+        if not all(isinstance(rule, ActuationRule) for rule in self.actuation_rules):
+            raise TypeError("Environmental profile rules must be ActuationRule values")
+        metrics = [threshold.metric for threshold in self.thresholds]
+        if len(metrics) != len(set(metrics)):
+            raise ValueError("An environmental profile has one threshold per metric")
+        for rule in self.actuation_rules:
+            if rule.metric not in metrics:
+                raise ValueError(f"The rule of {rule.metric.value} needs a threshold of that metric")
+        if self.cloud_updated_at is not None:
+            object.__setattr__(self, "cloud_updated_at", _utc(self.cloud_updated_at, "Cloud update time"))
+        object.__setattr__(self, "synced_at", _utc(self.synced_at, "Synchronization time"))
