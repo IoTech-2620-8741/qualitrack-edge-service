@@ -11,14 +11,14 @@ from iam.domain.enums import DeviceType
 class Device:
     """Registered device aggregate with credential and access lifecycle rules."""
 
-    devices_id: str
+    device_id: str
     credential: ApiCredential
     device_type: DeviceType
     created_at: datetime
     revoked_at: datetime | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.devices_id, str) or not self.devices_id.strip():
+        if not isinstance(self.device_id, str) or not self.device_id.strip():
             raise ValueError("Devices identifier cannot be empty")
         if not isinstance(self.credential, ApiCredential):
             raise ValueError("Devices requires an API credential verifier")
