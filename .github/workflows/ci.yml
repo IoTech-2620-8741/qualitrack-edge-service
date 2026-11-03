@@ -17,3 +17,57 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m unittest -v
+
+  # Runs the docker-compose.yml of the local station: Gunicorn, the devices
+  # commands, the reception of a reading and the qualitrack-data volume.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Settings of the station
+        run: |
+          printf 'TEST_DEVICE_ID=ENV-001\nCLOUD_SYNC_ENABLED=false\n' > .env.production
+      - name: Start the service
+        run: docker compose up -d --build
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          url=http://localhost:5000/api/v1
+          wait_for_edge() {
+            for attempt in $(seq 1 30); do
+              status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/auth/sign-in" \
+                -H 'Content-Type: application/json' -d '{"device_id":"CNT-001"}' || true)
+              [ "$status" = "401" ] && return 0
+              sleep 1
+            done
+            docker compose logs qualitrack-edge
+            return 1
+          }
+          wait_for_edge
+          key=$(docker compose exec -T qualitrack-edge flask --app app devices register CNT-001 CONTAINER_MONITOR \
+            | tail -n 1 | sed 's/.*: //')
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/auth/sign-in" \
+            -H 'Content-Type: application/json' -H "X-API-Key: $key" -d '{"device_id":"CNT-001"}')" = 200
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/monitoring/container-readings" \
+            -H 'Content-Type: application/json' -H "X-API-Key: $key" \
+            -d "{\"device_id\":\"CNT-001\",\"measured_at\":\"$now\",\"temperature\":21.5}")" = 201
+          docker compose down
+          docker compose up -d
+          wait_for_edge
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/auth/sign-in" \
+            -H 'Content-Type: application/json' -H "X-API-Key: $key" -d '{"device_id":"CNT-001"}')" = 200
+          docker compose exec -T qualitrack-edge flask --app app cloud pending | tee pending.txt
+          grep -q 'Readings: PENDING 1' pending.txt
+      - name: Stop the service
+        if: always()
+        run: docker compose down -v
+
+  # Builds the image for the Raspberry Pi 4 of the local station.
+  docker-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - run: docker buildx build --platform linux/arm64 --tag qualitrack-edge:arm64 .
