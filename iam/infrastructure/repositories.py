@@ -19,6 +19,13 @@ class DeviceRepository:
             return None
         return self._to_entity(row)
 
+    def find_all(self) -> list[Device]:
+        """Load every registered device, ordered by identity."""
+        return [
+            self._to_entity(row)
+            for row in DeviceModel.select().order_by(DeviceModel.device_id)
+        ]
+
     @staticmethod
     def _to_entity(row: DeviceModel) -> Device:
         return Device(

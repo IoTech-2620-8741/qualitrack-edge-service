@@ -1,6 +1,6 @@
 # QualiTrack Edge Service
 
-`qualytrack-edge-service` is the Edge Application of QualiTrack. It runs on the
+`qualitrack-edge-service` is the Edge Application of QualiTrack. It runs on the
 local station of each pharmaceutical facility (a Raspberry Pi 4) and sits
 between the ESP32 nodes and the QualiTrack Cloud REST API. It follows a
 Domain-Driven Design (DDD) approach.
@@ -16,13 +16,14 @@ The QualiTrack nodes are:
 ## Current Scope
 
 - **Implemented**
-  - authentication of a node with its `device_id` and `X-API-Key`
-  - API keys stored as salted PBKDF2 verifiers, with revocation and rotation in
-    the device aggregate
+  - sign-in of the environmental device and the container monitor with their
+    `device_id` and `X-API-Key` at `POST /api/v1/auth/sign-in` (TS53, TS54)
+  - `flask devices` commands to register the nodes with a random API key,
+    rotate their key, revoke them and list them
+  - API keys stored as salted PBKDF2 verifiers
   - optional registration of a development test node
   - SQLite persistence through Peewee
 - **Planned** (technical stories of the QualiTrack Report, epic EP07)
-  - node sign-in at `POST /api/v1/auth/sign-in` (TS53, TS54)
   - reception of environmental and container readings and of actuation events
     (TS55, TS56, TS57)
   - local storage of the records that are not synchronized yet (TS60)
@@ -64,7 +65,7 @@ Each bounded context follows the same structure:
 - **Interfaces**: Flask HTTP endpoints and request validation with Pydantic.
 
 ```text
-qualytrack-edge-service/
+qualitrack-edge-service/
 ├── app.py
 ├── config.py
 ├── iam/
@@ -127,7 +128,24 @@ settings and does not supply defaults for missing ones.
 | `HOST` | Address the service listens on; `0.0.0.0` lets the nodes of the local network reach it |
 | `PORT` | Port the service listens on |
 
-### 4. Run the service
+### 4. Register the nodes
+
+Register each ESP32 with the identifier the cloud registers for it
+(`sensorExternalId`) and its type. The command generates a random API key and
+shows it only once: write it to the firmware of the node. The Edge keeps only
+its one-way verifier.
+
+```sh
+flask --app app devices register ENV-001 ENVIRONMENTAL_DEVICE
+flask --app app devices register CNT-001 CONTAINER_MONITOR
+flask --app app devices list
+```
+
+`flask --app app devices rotate-key <device_id>` gives a node a new key and
+invalidates the previous one. `flask --app app devices revoke <device_id>`
+stops a node from signing in. These operations are not exposed over HTTP.
+
+### 5. Run the service
 
 ```sh
 APP_ENV=development python app.py
@@ -136,7 +154,7 @@ APP_ENV=development python app.py
 The built-in Flask server is for development only. Production must run behind
 a production WSGI server.
 
-### 5. Run the tests
+### 6. Run the tests
 
 ```sh
 python -m unittest -v
@@ -144,11 +162,12 @@ python -m unittest -v
 
 ## API Contract
 
-### Authenticate a node
+### Sign in a node
 
-`POST /api/v1/iam/authentications`
+`POST /api/v1/auth/sign-in`
 
-Checks that the node is registered, active, and presents its matching API key.
+Checks that the environmental device or container monitor is registered,
+active, and presents its matching API key (TS53, TS54).
 
 #### Required headers
 
@@ -165,11 +184,20 @@ Checks that the node is registered, active, and presents its matching API key.
 
 #### Responses
 
-- `200 OK`: credentials are valid; the response includes `device_id` and
-  `"authenticated": true`.
-- `400 Bad Request`: invalid JSON or unexpected fields.
+- `200 OK`: credentials are valid.
+- `400 Bad Request`: invalid JSON, an empty `device_id` or unexpected fields.
 - `401 Unauthorized`: missing or invalid API key, or unknown or revoked node.
 - `415 Unsupported Media Type`: the request is not JSON.
+
+#### Success response
+
+```json
+{
+  "device_id": "ENV-001",
+  "device_type": "ENVIRONMENTAL_DEVICE",
+  "authenticated": true
+}
+```
 
 ## Changelog
 

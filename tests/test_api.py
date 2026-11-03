@@ -1,18 +1,4 @@
-import os
-import tempfile
 import unittest
-
-_test_directory = tempfile.TemporaryDirectory(prefix="qualitrack-edge-test-")
-os.environ.update({
-    "APP_ENV": "development",
-    "DEBUG": "false",
-    "DATABASE_PATH": os.path.join(_test_directory.name, "test.db"),
-    "SEED_TEST_DEVICE": "true",
-    "TEST_DEVICE_ID": "ENV-001",
-    "TEST_DEVICE_API_KEY": "test-only-key",
-    "HOST": "127.0.0.1",
-    "PORT": "5000",
-})
 
 from app import create_app
 from iam.infrastructure.models import Device as DeviceModel
@@ -27,15 +13,18 @@ class IamApiTestCase(unittest.TestCase):
     def setUp(self):
         self.client = self.app.test_client()
 
-    def test_authenticates_registered_device(self):
+    def test_signs_in_registered_device_with_its_type(self):
         response = self.client.post(
-            "/api/v1/iam/authentications",
+            "/api/v1/auth/sign-in",
             json={"device_id": "ENV-001"},
             headers={"X-API-Key": "test-only-key"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json, {"device_id": "ENV-001", "authenticated": True})
+        self.assertEqual(
+            response.json,
+            {"device_id": "ENV-001", "device_type": "ENVIRONMENTAL_DEVICE", "authenticated": True},
+        )
 
     def test_rejects_invalid_device_credentials(self):
         for device_id, api_key in (
@@ -44,15 +33,16 @@ class IamApiTestCase(unittest.TestCase):
         ):
             with self.subTest(device_id=device_id):
                 response = self.client.post(
-                    "/api/v1/iam/authentications",
+                    "/api/v1/auth/sign-in",
                     json={"device_id": device_id},
                     headers={"X-API-Key": api_key},
                 )
                 self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json, {"error": "Invalid device_id or API key"})
 
     def test_rejects_missing_api_key(self):
         response = self.client.post(
-            "/api/v1/iam/authentications",
+            "/api/v1/auth/sign-in",
             json={"device_id": "ENV-001"},
         )
 
@@ -60,18 +50,18 @@ class IamApiTestCase(unittest.TestCase):
         self.assertEqual(response.json, {"error": "Missing X-API-Key"})
 
     def test_rejects_malformed_or_extra_request_fields(self):
-        for body in ({}, {"device_id": "ENV-001", "metric": "AIR_QUALITY"}):
+        for body in ({}, {"device_id": " "}, {"device_id": "ENV-001", "metric": "AIR_QUALITY"}):
             with self.subTest(body=body):
                 response = self.client.post(
-                    "/api/v1/iam/authentications",
+                    "/api/v1/auth/sign-in",
                     json=body,
                     headers={"X-API-Key": "test-only-key"},
                 )
                 self.assertEqual(response.status_code, 400)
 
-    def test_rejects_non_json_authentication_request(self):
+    def test_rejects_non_json_sign_in_request(self):
         response = self.client.post(
-            "/api/v1/iam/authentications",
+            "/api/v1/auth/sign-in",
             data="{}",
             content_type="text/plain",
             headers={"X-API-Key": "test-only-key"},
@@ -81,13 +71,22 @@ class IamApiTestCase(unittest.TestCase):
 
     def test_rejects_malformed_json(self):
         response = self.client.post(
-            "/api/v1/iam/authentications",
+            "/api/v1/auth/sign-in",
             data="{",
             content_type="application/json",
             headers={"X-API-Key": "test-only-key"},
         )
 
         self.assertEqual(response.status_code, 400)
+
+    def test_previous_authentication_route_is_removed(self):
+        response = self.client.post(
+            "/api/v1/iam/authentications",
+            json={"device_id": "ENV-001"},
+            headers={"X-API-Key": "test-only-key"},
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_seeded_device_stores_a_verifier_instead_of_the_api_key(self):
         with self.app.app_context():

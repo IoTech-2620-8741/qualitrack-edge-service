@@ -13,6 +13,10 @@ class DeviceRepository(Protocol):
         """Load a device aggregate by its identity."""
         ...
 
+    def find_all(self) -> list[Device]:
+        """Load every registered device aggregate, ordered by identity."""
+        ...
+
     def save(self, device: Device) -> Device:
         """Persist a device aggregate's current state."""
         ...
