@@ -40,8 +40,10 @@ The QualiTrack nodes are:
     (TS64), and its delivery to the environmental device (TS58) and the
     container monitor (TS59) at `GET /api/v1/configurations/{deviceId}`
   - SQLite persistence through Peewee
-- **Planned** (technical stories of the QualiTrack Report, epic EP07)
-  - deployment with Docker Compose and Gunicorn on the local station
+  - deployment on the local station with Docker Compose and Gunicorn, with the
+    database in the `qualitrack-data` volume (report 4.1.3.4)
+
+These cover the Edge stories of the QualiTrack Report (epic EP07, TS53–TS64).
 
 ## Bounded Contexts
 
@@ -95,8 +97,12 @@ Each bounded context follows the same structure:
 
 ```text
 qualitrack-edge-service/
-├── app.py
-├── config.py
+├── app.py               # application factory and composition
+├── config.py            # environment settings
+├── wsgi.py              # entry point of Gunicorn
+├── gunicorn.conf.py
+├── Dockerfile
+├── docker-compose.yml   # service qualitrack-edge and volume qualitrack-data
 ├── iam/
 │   ├── domain/
 │   ├── application/
@@ -122,6 +128,8 @@ qualitrack-edge-service/
 - python-dotenv
 - Requests
 - SQLite
+- Gunicorn
+- Docker Compose (Raspberry Pi 4 with Raspberry Pi OS Lite on the local station)
 
 Exact Python dependencies are declared in [`requirements.txt`](requirements.txt).
 
@@ -231,8 +239,7 @@ APP_ENV=development python app.py
 
 `python app.py` also starts the background synchronization with the cloud;
 `flask` commands never start it. The built-in Flask server is for development
-only. Production must run behind a production WSGI server with a single worker
-process, as SQLite and the synchronization thread expect.
+only; the local station runs Gunicorn (see [Deployment](#deployment-on-the-local-station)).
 
 `flask --app app cloud pending` counts the stored readings and actions by
 synchronization status (`PENDING`, `SYNCED`, `REJECTED`).
@@ -242,6 +249,61 @@ synchronization status (`PENDING`, `SYNCED`, `REJECTED`).
 ```sh
 python -m unittest -v
 ```
+
+## Deployment on the Local Station
+
+The Edge runs on the local station of the facility, a Raspberry Pi 4 with
+Raspberry Pi OS Lite and Docker Engine (report 4.1.3.4). Docker Compose runs
+the service `qualitrack-edge`: the Edge REST API on Gunicorn with one worker
+process, as SQLite and the synchronization thread expect, which also starts the
+background synchronization with the cloud. The named volume `qualitrack-data`
+keeps the SQLite database, so the readings survive a restart or the recreation
+of the container. The container restarts with the station.
+
+### 1. Configure the station
+
+```sh
+cp .env.example .env.production
+```
+
+In `.env.production`, set `TEST_DEVICE_ID` (required by the settings even
+without the test node) and the `CLOUD_*` settings of the operator account, with
+an `https` URL. `docker-compose.yml` fixes the production values: `APP_ENV`,
+`DEBUG=false`, `SEED_TEST_DEVICE=false`, `DATABASE_PATH=/data/edge.db`, `HOST`
+and `PORT`. Keep `.env.production` out of version control.
+
+### 2. Start the service
+
+```sh
+docker compose up -d --build
+docker compose logs -f qualitrack-edge
+```
+
+The Edge listens on port `5000` of the station; the nodes use
+`http://<station address>:5000/api/v1`.
+
+### 3. Register the nodes and check the cloud
+
+The `flask` commands run inside the container:
+
+```sh
+docker compose exec qualitrack-edge flask --app app devices register ENV-001 ENVIRONMENTAL_DEVICE
+docker compose exec qualitrack-edge flask --app app devices register CNT-001 CONTAINER_MONITOR
+docker compose exec qualitrack-edge flask --app app cloud sync
+docker compose exec qualitrack-edge flask --app app cloud pending
+```
+
+### 4. Update the service
+
+```sh
+git pull
+docker compose up -d --build
+```
+
+`docker compose down` stops the service and keeps the volume; only
+`docker compose down -v` deletes the database. The CI builds the image for
+`linux/arm64`, the architecture of the Raspberry Pi 4, and runs the compose
+file to check the service, the commands and the volume.
 
 ## API Contract
 

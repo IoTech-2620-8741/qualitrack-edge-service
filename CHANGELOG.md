@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tracking (tracking): `GET /api/v1/configurations/{deviceId}` hands the environmental device (TS58) and the container monitor (TS59) the profile they apply (#6).
 
+- Deployment on the local station with Docker Compose: the service `qualitrack-edge` runs the Edge on Gunicorn (`wsgi.py`, `gunicorn.conf.py`, one worker) and the volume `qualitrack-data` keeps the SQLite database. The image builds for `linux/arm64` and `linux/amd64`, and CI checks the compose service and the arm64 build (#7).
+
 ### Changed
 
 - IAM (iam): the device types and the device identifier follow the cloud registry: `ENVIRONMENTAL_DEVICE` instead of `ENVIRONMENT_MONITOR`, and the `sensorExternalId` of the node (for example `ENV-001`) instead of its MAC address (#1).
