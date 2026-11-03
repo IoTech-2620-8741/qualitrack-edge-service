@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tracking (tracking): local copy of the device registry of the laboratory, with the environment and cloud identifier of each node, read from the equipment of the cloud by the background thread and by `flask cloud sync`, and listed by `flask cloud devices` (#3).
 
+- Tracking (tracking): `POST /api/v1/monitoring/environment-readings` (TS55), `POST /api/v1/monitoring/container-readings` (TS56) and `POST /api/v1/control/actuation-events` (TS57), validated with the rules of the cloud. The nodes are authenticated through the IAM anti-corruption layer (#4).
+
+- Tracking (tracking): every reading and action is kept in SQLite as `PENDING` until the cloud accepts it; a retry of the same observation is not stored twice and a retry with different data is rejected with `409`. `flask cloud pending` counts them by synchronization status (TS60) (#4).
+
 ### Changed
 
 - IAM (iam): the device types and the device identifier follow the cloud registry: `ENVIRONMENTAL_DEVICE` instead of `ENVIRONMENT_MONITOR`, and the `sensorExternalId` of the node (for example `ENV-001`) instead of its MAC address (#1).
