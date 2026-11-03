@@ -24,9 +24,9 @@ The QualiTrack nodes are:
   - optional registration of a development test node
   - connection with the QualiTrack Cloud REST API with the account of an
     operator, signing in again when the token expires
-  - local copy of the device registry of the laboratory (environment and cloud
-    identifiers of each node), refreshed by a background thread and by
-    `flask cloud sync`
+  - local copy of the cloud registry of the nodes registered in this Edge
+    (environment and cloud identifiers of each node), refreshed by a background
+    thread and by `flask cloud sync`; nodes of other stations are left out
   - reception of the air quality and motion of the environmental device
     (TS55), of the temperature, humidity, luminosity and RFID tags of the
     container monitor (TS56), and of the actions of the container monitor
@@ -214,9 +214,13 @@ flask --app app cloud profiles
 `CLOUD_SYNC_INTERVAL_SECONDS` while the service is up:
 
 1. It reads the environmental devices and container monitors of the
-   laboratory: the equipment that has a `sensorExternalId` in the cloud.
-   `cloud devices` lists this local copy with the environment and cloud
-   identifier of each node.
+   laboratory, the equipment that has a `sensorExternalId` in the cloud, and
+   keeps only the nodes registered in this Edge with `flask devices register`.
+   The laboratory may have nodes in environments other stations serve; the
+   Edge neither keeps them nor reads their profiles. `cloud devices` lists this
+   local copy with the environment and cloud identifier of each node, and
+   `cloud sync` names the nodes registered in this Edge that the cloud does not
+   have, for example because of a different `sensorExternalId`.
 2. It copies the environmental profile of every node placed in an
    environment (`/laboratories/{id}/environments/{id}/devices/{id}/environmental-profile`):
    the profile of the environment for the environmental device, and the

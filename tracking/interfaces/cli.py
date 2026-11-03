@@ -29,8 +29,13 @@ def _registry_service():
 def synchronize() -> None:
     """Read the registry and the profiles and send the pending readings and actions now."""
     try:
-        devices = _registry_service().synchronize_registry()
-        click.echo(f"Device registry: {len(devices)} device(s) from the cloud")
+        registry = _registry_service().synchronize_registry()
+        click.echo(f"Device registry: {len(registry.devices)} device(s) of this Edge from the cloud")
+        if registry.not_in_cloud:
+            click.echo(
+                "Registered in this Edge but not in the cloud (check their sensorExternalId): "
+                + ", ".join(registry.not_in_cloud)
+            )
         profiles = current_app.extensions["environmental_profile_service"].synchronize_profiles()
         click.echo(f"Environmental profiles: {len(profiles)} profile(s) from the cloud")
         summaries = current_app.extensions["telemetry_synchronization_service"].synchronize_pending()

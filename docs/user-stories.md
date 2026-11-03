@@ -33,7 +33,7 @@ interface layers, and the shared infrastructure.
 | TS61 | Synchronize the pending environmental telemetry with the cloud | Tracking; Shared (cloud session) | `tracking/application/services.py`: `TelemetrySynchronizationApplicationService.synchronize_pending`; `tracking/infrastructure/cloud_telemetry_gateway.py`: `CloudTelemetryGateway.send_reading`; `shared/infrastructure/cloud_session.py`: `CloudSession`; `shared/infrastructure/cloud_sync_scheduler.py`: `CloudSyncScheduler` |
 | TS62 | Synchronize the pending container telemetry with the cloud | Tracking; Shared (cloud session) | Same elements as TS61, with the container monitor route |
 | TS63 | Synchronize the pending actuation events with the cloud | Tracking; Shared (cloud session) | `tracking/infrastructure/cloud_telemetry_gateway.py`: `CloudTelemetryGateway.send_actuation_event`; the same application service and shared elements as TS61 |
-| TS64 | Synchronize the configurations from the cloud to the Edge | Tracking; Shared (cloud session) | `tracking/application/services.py`: `DeviceRegistryApplicationService.synchronize_registry`, `EnvironmentalProfileApplicationService.synchronize_profiles`; `tracking/infrastructure/cloud_registry_gateway.py`: `CloudDeviceRegistryGateway`; `tracking/infrastructure/cloud_profile_gateway.py`: `CloudProfileGateway`; `tracking/interfaces/cli.py`: `synchronize` |
+| TS64 | Synchronize the configurations from the cloud to the Edge | Tracking; IAM (nodes of this Edge); Shared (cloud session) | `tracking/application/services.py`: `DeviceRegistryApplicationService.synchronize_registry`, `EnvironmentalProfileApplicationService.synchronize_profiles`; `tracking/integration/iam_anti_corruption_layer.py`: `IamAntiCorruptionLayer.registered_device_ids`; `tracking/infrastructure/cloud_registry_gateway.py`: `CloudDeviceRegistryGateway`; `tracking/infrastructure/cloud_profile_gateway.py`: `CloudProfileGateway`; `tracking/interfaces/cli.py`: `synchronize` |
 
 ### TS53 — Authenticate environmental devices in the Edge
 As a Developer, I want to validate the identity of each environmental device before accepting its requests in the Edge, so that data from unregistered nodes is not accepted.
@@ -280,9 +280,20 @@ As a Developer, I want to get from the cloud the current configurations of both 
 Acceptance criteria:
 - Scenario: Registry and profiles copied
   - Given the operator account of the Edge can access the laboratory
-  - When the synchronization reads `GET /api/v1/laboratories/{laboratoryId}/equipments` and, for each node placed in an environment, `GET /api/v1/laboratories/{laboratoryId}/environments/{environmentId}/devices/{deviceId}/environmental-profile`
+  - When the synchronization reads `GET /api/v1/laboratories/{laboratoryId}/equipments` and, for each node of this Edge placed in an environment, `GET /api/v1/laboratories/{laboratoryId}/environments/{environmentId}/devices/{deviceId}/environmental-profile`
   - Then the Edge keeps the cloud identifiers of each node and the profile it applies with its version
   - And `flask cloud devices` and `flask cloud profiles` list them
+
+- Scenario: Nodes of other stations
+  - Given the laboratory has nodes in environments another station serves
+  - And they are not registered in this Edge with `flask devices register`
+  - When the synchronization reads the registry
+  - Then the Edge keeps only the nodes registered in it and reads only their profiles
+
+- Scenario: Node registered in the Edge but not in the cloud
+  - Given a node registered in this Edge whose `sensorExternalId` the cloud does not have
+  - When `flask cloud sync` runs
+  - Then the command names the node, and its records wait until the cloud registers it
 
 - Scenario: Node without profile
   - Given the cloud answers `404 Not Found` for the profile of a node

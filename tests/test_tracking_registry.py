@@ -122,6 +122,16 @@ class FakeRegistryGateway:
         return answer
 
 
+class FakeLayer:
+    """The nodes registered in this Edge, as the IAM anti-corruption layer reports them."""
+
+    def __init__(self, *device_ids):
+        self.device_ids = set(device_ids)
+
+    def registered_device_ids(self):
+        return self.device_ids
+
+
 class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -144,6 +154,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
                 [monitored("CNT-001", DeviceType.CONTAINER_MONITOR, 3, 16)],
                 CloudUnavailableError("offline"),
             ),
+            FakeLayer("ENV-001", "CNT-001"),
             self.repository,
         )
 
@@ -159,9 +170,27 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
             service.synchronize_registry()
         self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001"])
 
+    def test_keeps_only_the_nodes_registered_in_this_edge(self):
+        service = DeviceRegistryApplicationService(
+            FakeRegistryGateway([
+                monitored("ENV-001"),
+                monitored("CNT-001", DeviceType.CONTAINER_MONITOR, 2, 16),
+                monitored("CNT-OTHER", DeviceType.CONTAINER_MONITOR, 9, 30),
+            ]),
+            FakeLayer("ENV-001", "CNT-001", "CNT-TYPO"),
+            self.repository,
+        )
+
+        registry = service.synchronize_registry()
+
+        self.assertEqual([d.device_id for d in registry.devices], ["ENV-001", "CNT-001"])
+        self.assertEqual(registry.not_in_cloud, ["CNT-TYPO"])
+        self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001", "ENV-001"])
+        self.assertIsNone(service.find_monitored_device("CNT-OTHER"))
+
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
-            DeviceRegistryApplicationService(None, self.repository).synchronize_registry()
+            DeviceRegistryApplicationService(None, FakeLayer(), self.repository).synchronize_registry()
 
 
 class CloudSyncSchedulerTestCase(unittest.TestCase):

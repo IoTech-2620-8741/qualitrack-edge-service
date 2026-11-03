@@ -11,7 +11,8 @@ from shared.infrastructure.database import db
 class MonitoredDevice(Model):
     """ORM mapping for the ``monitored_devices`` table.
 
-    Each row is a node the cloud registers for the laboratory of the Edge.
+    Each row is a node registered in this Edge, as the cloud registers it for
+    the laboratory.
 
     Attributes:
         device_id (CharField): Natural primary key — the identifier with

@@ -39,6 +39,20 @@ class IamAntiCorruptionLayerTestCase(unittest.TestCase):
         )
         self.assertIsNone(layer.authenticated_reporting_device("CNT-001", "invalid"))
 
+    def test_reports_the_nodes_registered_in_this_edge_revoked_ones_included(self):
+        class FakeIamDevice:
+            def __init__(self, device_id, revoked):
+                self.device_id = device_id
+                self.revoked_at = NOW if revoked else None
+
+        class FakeIamAuthenticationService:
+            def list_devices(self):
+                return [FakeIamDevice("ENV-001", False), FakeIamDevice("CNT-009", True)]
+
+        layer = IamAntiCorruptionLayer(FakeIamAuthenticationService())
+
+        self.assertEqual(layer.registered_device_ids(), {"ENV-001", "CNT-009"})
+
 
 class FakeLayer:
     def __init__(self, device):
