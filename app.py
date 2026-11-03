@@ -1,18 +1,20 @@
 """Flask application entry point for the QualiTrack Edge Service.
 
 This module wires together the Flask application, registers the IAM
-bounded-context Blueprint and command group, and configures the SQLite
-database.
+bounded-context Blueprint and the command groups, configures the SQLite
+database, and composes the cloud synchronization of the Tracking context.
 
 Typical usage::
 
-    flask --app app run
-    # or
     python app.py
     # register a node
     flask --app app devices register ENV-001 ENVIRONMENTAL_DEVICE
+    # read the device registry of the cloud now
+    flask --app app cloud sync
 """
 
+import logging
+import os
 from pathlib import Path
 
 from flask import Flask
@@ -21,7 +23,12 @@ from config import load_config
 from iam.application.services import AuthApplicationService
 from iam.interfaces.cli import devices_cli
 from iam.interfaces.services import iam_api
+from shared.infrastructure.cloud_session import CloudSession
+from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, db, init_db
+from tracking.application.services import DeviceRegistryApplicationService
+from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from tracking.interfaces.cli import cloud_cli
 
 def create_app() -> Flask:
     """Create and initialize the Flask application."""
@@ -32,8 +39,25 @@ def create_app() -> Flask:
 
     app.register_blueprint(iam_api)
     app.cli.add_command(devices_cli)
+    app.cli.add_command(cloud_cli)
     iam_authentication_service = AuthApplicationService()
     app.extensions["iam_authentication_service"] = iam_authentication_service
+
+    registry_gateway = None
+    if app.config["CLOUD_SYNC_ENABLED"]:
+        cloud_session = CloudSession(
+            app.config["CLOUD_API_URL"],
+            app.config["CLOUD_USERNAME"],
+            app.config["CLOUD_PASSWORD"],
+        )
+        registry_gateway = CloudDeviceRegistryGateway(cloud_session)
+    device_registry_service = DeviceRegistryApplicationService(registry_gateway)
+    app.extensions["device_registry_service"] = device_registry_service
+    if registry_gateway is not None:
+        app.extensions["cloud_sync_scheduler"] = CloudSyncScheduler(
+            app.config["CLOUD_SYNC_INTERVAL_SECONDS"],
+            [("device registry", device_registry_service.synchronize_registry)],
+        )
 
     if app.config["SEED_TEST_DEVICE"]:
         iam_authentication_service.get_or_create_test_device(
@@ -47,6 +71,22 @@ def create_app() -> Flask:
             db.close()
 
     return app
+
+
+def start_cloud_sync(app: Flask) -> None:
+    """Start the background cloud synchronization when it is enabled.
+
+    It runs only in the process that serves requests, never in ``flask``
+    commands, and only once under the development reloader.
+    """
+    scheduler = app.extensions.get("cloud_sync_scheduler")
+    if scheduler is None:
+        return
+    if app.config["DEBUG"] and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return
+    scheduler.start()
+
+
 app = create_app()
 
 if __name__ == "__main__":
@@ -54,6 +94,8 @@ if __name__ == "__main__":
         raise RuntimeError(
             "The built-in Flask server is development-only; use a production WSGI server"
         )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    start_cloud_sync(app)
     app.run(
         debug=app.config["DEBUG"],
         host=app.config["HOST"],
