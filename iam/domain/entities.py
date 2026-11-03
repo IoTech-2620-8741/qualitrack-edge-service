@@ -14,7 +14,7 @@ class Device:
     devices_id: str
     credential: ApiCredential
     device_type: DeviceType
-    create_at: datetime
+    created_at: datetime
     revoked_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -24,18 +24,18 @@ class Device:
             raise ValueError("Devices requires an API credential verifier")
         if not isinstance(self.device_type, DeviceType):
             raise ValueError("Devices required a valid device type")
-        if not isinstance(self.create_at,datetime):
+        if not isinstance(self.created_at,datetime):
             raise ValueError("Device creation time must be a datatime")
-        if self.create_at.tzinfo is None or self.create_at.utcoffset() is None:
+        if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("Device creation time must include a timezone")
-        object.__setattr__(self, "created_at", self.create_at.astimezone(UTC))
+        object.__setattr__(self, "created_at", self.created_at.astimezone(UTC))
         if self.revoked_at is not None:
             if not isinstance(self.revoked_at, datetime):
                 raise TypeError("Revocation time must be a datetime")
             if self.revoked_at.tzinfo is None or self.revoked_at.utcoffset() is None:
                 raise ValueError("Revocation time must include a timezone")
             object.__setattr__(self, "revoked_at", self.revoked_at.astimezone(UTC))
-            if self.revoked_at < self.create_at:
+            if self.revoked_at < self.created_at:
                 raise ValueError("Revocation cannot predate device registration")
 
     @classmethod
