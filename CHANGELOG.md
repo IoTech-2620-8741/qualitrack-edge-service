@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Deployment on the local station with Docker Compose: the service `qualitrack-edge` runs the Edge on Gunicorn (`wsgi.py`, `gunicorn.conf.py`, one worker) and the volume `qualitrack-data` keeps the SQLite database. The image builds for `linux/arm64` and `linux/amd64`, and CI checks the compose service and the arm64 build (#7).
 
+- Documentation in `docs/`: the technical stories TS53–TS64 with Gherkin acceptance criteria and a Requirements Traceability Matrix, the PlantUML class diagram of the bounded contexts, and the architecture decision records ADR-0001 to ADR-0010 (#8).
+
 ### Changed
 
 - IAM (iam): the device types and the device identifier follow the cloud registry: `ENVIRONMENTAL_DEVICE` instead of `ENVIRONMENT_MONITOR`, and the `sensorExternalId` of the node (for example `ENV-001`) instead of its MAC address (#1).
