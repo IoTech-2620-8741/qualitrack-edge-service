@@ -100,6 +100,33 @@ class LoadConfigTestCase(unittest.TestCase):
             ), self.assertRaisesRegex(ValueError, "TEST_DEVICE_API_KEY"):
                 load_config(root)
 
+    def test_retention_days_default_to_7_and_90_and_can_be_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_environment_file(root, "development")
+            with patch.dict(os.environ, {"APP_ENV": "development"}, clear=True):
+                defaults = load_config(root)
+            with patch.dict(
+                os.environ,
+                {"APP_ENV": "development", "SYNCED_RETENTION_DAYS": "3", "REJECTED_RETENTION_DAYS": " 30 "},
+                clear=True,
+            ):
+                configured = load_config(root)
+
+        self.assertEqual((defaults["SYNCED_RETENTION_DAYS"], defaults["REJECTED_RETENTION_DAYS"]), (7, 90))
+        self.assertEqual((configured["SYNCED_RETENTION_DAYS"], configured["REJECTED_RETENTION_DAYS"]), (3, 30))
+
+    def test_rejects_retention_days_that_are_not_a_positive_integer(self):
+        for name in ("SYNCED_RETENTION_DAYS", "REJECTED_RETENTION_DAYS"):
+            for value, message in (("0", "at least 1"), ("-5", "at least 1"), ("week", "an integer")):
+                with self.subTest(name=name, value=value), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    write_environment_file(root, "development")
+                    with patch.dict(
+                        os.environ, {"APP_ENV": "development", name: value}, clear=True
+                    ), self.assertRaisesRegex(ValueError, f"{name} must be {message}"):
+                        load_config(root)
+
     def test_cloud_settings_are_optional_while_the_synchronization_is_disabled(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

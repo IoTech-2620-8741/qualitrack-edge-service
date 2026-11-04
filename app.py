@@ -16,6 +16,7 @@ Typical usage::
 
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from flask import Flask
@@ -72,7 +73,11 @@ def create_app() -> Flask:
     environmental_profile_service = EnvironmentalProfileApplicationService(
         profile_gateway, iam_anti_corruption_layer
     )
-    telemetry_synchronization_service = TelemetrySynchronizationApplicationService(telemetry_gateway)
+    telemetry_synchronization_service = TelemetrySynchronizationApplicationService(
+        telemetry_gateway,
+        synced_retention=timedelta(days=app.config["SYNCED_RETENTION_DAYS"]),
+        rejected_retention=timedelta(days=app.config["REJECTED_RETENTION_DAYS"]),
+    )
     app.extensions["device_registry_service"] = device_registry_service
     app.extensions["environmental_profile_service"] = environmental_profile_service
     app.extensions["telemetry_synchronization_service"] = telemetry_synchronization_service
@@ -84,6 +89,7 @@ def create_app() -> Flask:
                 ("device registry", device_registry_service.synchronize_registry),
                 ("environmental profiles", environmental_profile_service.synchronize_profiles),
                 ("pending telemetry", telemetry_synchronization_service.synchronize_pending),
+                ("telemetry purge", telemetry_synchronization_service.purge),
             ],
         )
 

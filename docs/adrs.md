@@ -378,3 +378,51 @@ registered in the Edge that the cloud does not have.
   looked up and kept by hand and lose a node that changes environment.
 - A list of equipment per environment in the cloud, which needs a change and
   a deployment of the cloud and still needs the environments of each station.
+
+## ADR-0012: Delete the telemetry the cloud answered long ago
+
+- **Status**: Accepted
+- **Date**: 2026-11-04
+
+### Context
+
+The Edge stored every reading and action in SQLite and kept it after the cloud
+answered. Nothing deleted a record, so the database of the Raspberry Pi grew
+with every reading until the SD card was full. With 15 nodes that send every
+10 seconds that is about 390,000 records a day, and a full card makes the Edge
+lose the readings it receives.
+
+### Decision
+
+The background synchronization deletes the records the cloud already answered:
+`SYNCED` ones after `SYNCED_RETENTION_DAYS` (7 by default) and `REJECTED` ones
+after `REJECTED_RETENTION_DAYS` (90 by default), counted from the moment the
+Edge received them. `PENDING` records are never deleted. It runs after the
+synchronization of the pending records, at most once an hour, and deletes in
+batches of 2,000 records, each in its own short transaction with a pause of
+50 ms, so the nodes that send readings wait for the single SQLite writer for
+a moment only. It is active by default.
+
+### Consequences
+
+- The database stops growing with the synchronized telemetry. SQLite reuses
+  the freed pages, so the file keeps its size instead of shrinking.
+- The cloud is the only copy of a reading after 7 days. If it accepted a
+  reading and lost it, the Edge cannot send it again.
+- A retry of the same observation after the retention period would be stored
+  as new; the nodes retry within minutes, so this does not happen.
+- `PENDING` records have no expiry, so a node the registry never places in an
+  environment, or a cloud that never accepts a record, still makes the
+  database grow. `flask cloud pending` shows the count.
+- The first purge of a station with a large backlog takes longer, in many
+  batches.
+
+### Alternatives considered
+
+- Deleting each record when the cloud accepts it, which leaves no local copy
+  for diagnosing a cloud problem.
+- One `DELETE` for everything old, which holds the SQLite writer for seconds
+  and stops the nodes from sending.
+- A size limit on the database instead of an age, which would delete
+  `PENDING` records or need a rule to choose which ones.
+

@@ -21,6 +21,8 @@ class AppConfig(TypedDict):
     CLOUD_USERNAME: str | None
     CLOUD_PASSWORD: str | None
     CLOUD_SYNC_INTERVAL_SECONDS: int | None
+    SYNCED_RETENTION_DAYS: int
+    REJECTED_RETENTION_DAYS: int
 
 
 def _as_bool(name: str, value: str) -> bool:
@@ -83,6 +85,8 @@ def load_config(project_root: Path) -> AppConfig:
         raise ValueError("HOST cannot be empty")
 
     cloud = _cloud_settings(values, environment_name)
+    synced_retention_days = _retention_days(values, "SYNCED_RETENTION_DAYS", 7)
+    rejected_retention_days = _retention_days(values, "REJECTED_RETENTION_DAYS", 90)
 
     return {
         "APP_ENV": environment_name,
@@ -93,6 +97,8 @@ def load_config(project_root: Path) -> AppConfig:
         "TEST_DEVICE_API_KEY": api_key,
         "HOST": host,
         "PORT": port,
+        "SYNCED_RETENTION_DAYS": synced_retention_days,
+        "REJECTED_RETENTION_DAYS": rejected_retention_days,
         **cloud,
     }
 
@@ -136,6 +142,20 @@ def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
         "CLOUD_PASSWORD": password,
         "CLOUD_SYNC_INTERVAL_SECONDS": interval,
     }
+
+def _retention_days(values: dict[str, str], name: str, default: int) -> int:
+    """Return the days the Edge keeps a synchronized or rejected record, ``default`` when unset."""
+    setting = values.get(name)
+    if setting is None or not setting.strip():
+        return default
+    try:
+        days = int(setting)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer") from error
+    if days < 1:
+        raise ValueError(f"{name} must be at least 1")
+    return days
+
 
 def _required(values: dict[str, str], name: str) -> str:
     """Return a configured value or report the missing environment setting."""
