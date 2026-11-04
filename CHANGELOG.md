@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tracking (tracking): the background synchronization deletes the readings and actions the cloud already answered: the `SYNCED` ones after `SYNCED_RETENTION_DAYS` (7 by default) and the `REJECTED` ones after `REJECTED_RETENTION_DAYS` (90 by default), at most once an hour and in batches of 2,000 records. Pending records are never deleted. It is active by default, so `flask cloud pending` shows fewer `SYNCED` records as time goes by (ADR-0012).
+
+- Settings `SYNCED_RETENTION_DAYS` and `REJECTED_RETENTION_DAYS`, both optional integers from 1 (ADR-0012).
+
 ## [0.2.0] - 2026-11-03
 
 ### Changed
