@@ -40,6 +40,17 @@ def _count_by_sync_status(model) -> dict[SyncStatus, int]:
     return counts
 
 
+def _delete_before(model, status: SyncStatus, cutoff: datetime, limit: int) -> int:
+    """Delete up to ``limit`` rows of ``status`` received before ``cutoff``, in one short transaction."""
+    ids = (
+        model.select(model.id)
+        .where((model.sync_status == status.value) & (model.received_at < cutoff))
+        .limit(limit)
+    )
+    with model._meta.database.atomic("IMMEDIATE"):
+        return model.delete().where(model.id.in_(ids)).execute()
+
+
 class TelemetryReadingRepository:
     """Persist the readings the Edge received, once per node, metric and time."""
 
@@ -79,6 +90,10 @@ class TelemetryReadingRepository:
     def count_by_sync_status(self) -> dict[SyncStatus, int]:
         """Count the stored readings of each synchronization status."""
         return _count_by_sync_status(TelemetryReadingModel)
+
+    def delete_before(self, status: SyncStatus, cutoff: datetime, limit: int) -> int:
+        """Delete up to ``limit`` readings of ``status`` received before ``cutoff``."""
+        return _delete_before(TelemetryReadingModel, status, cutoff, limit)
 
     def _save(self, readings: list[TelemetryReading]) -> TelemetryReadingSaveResult:
         stored, created = [], False
@@ -158,6 +173,10 @@ class ActuationEventRepository:
     def count_by_sync_status(self) -> dict[SyncStatus, int]:
         """Count the stored actions of each synchronization status."""
         return _count_by_sync_status(ActuationEventModel)
+
+    def delete_before(self, status: SyncStatus, cutoff: datetime, limit: int) -> int:
+        """Delete up to ``limit`` actions of ``status`` received before ``cutoff``."""
+        return _delete_before(ActuationEventModel, status, cutoff, limit)
 
     def _save(self, event: ActuationEvent) -> ActuationEventSaveResult:
         row = ActuationEventModel.get_or_none(

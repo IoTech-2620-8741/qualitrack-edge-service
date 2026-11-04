@@ -4,9 +4,11 @@ Application services coordinate Tracking use cases: they authenticate nodes
 through the IAM anti-corruption layer, read the cloud through injected
 gateways, invoke domain behavior and persist the outcome through repositories.
 """
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from tracking.application.errors import (
     CloudSynchronizationDisabled,
@@ -45,6 +47,14 @@ from tracking.infrastructure.repositories import (
     TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
 )
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
+
+LOGGER = logging.getLogger(__name__)
+
+# A purge deletes in short transactions with a pause between them, so the nodes
+# that send readings meanwhile wait for the single SQLite writer for a moment only.
+PURGE_BATCH_SIZE = 2000
+PURGE_PAUSE_SECONDS = 0.05
+PURGE_INTERVAL = timedelta(hours=1)
 
 
 class TelemetryApplicationService:
@@ -259,6 +269,10 @@ class TelemetrySynchronizationApplicationService:
         telemetry_reading_repository: TelemetryReadingRepository | None = None,
         actuation_event_repository: ActuationEventRepository | None = None,
         batch_size: int = 100,
+        synced_retention: timedelta = timedelta(days=7),
+        rejected_retention: timedelta = timedelta(days=90),
+        clock: Callable[[], datetime] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
     ):
         """Initialize the service; without a gateway the cloud synchronization is disabled."""
         self.telemetry_gateway = telemetry_gateway
@@ -270,6 +284,12 @@ class TelemetrySynchronizationApplicationService:
         )
         self.actuation_event_repository = actuation_event_repository or ActuationEventRepositoryImpl()
         self.batch_size = batch_size
+        self.synced_retention = synced_retention
+        self.rejected_retention = rejected_retention
+        self.clock = clock or (lambda: datetime.now(UTC))
+        self.sleep = sleep
+        # shortcut: the last purge is remembered in memory only, so a restart purges once more; harmless.
+        self._last_purge: datetime | None = None
 
     def synchronize_pending(self) -> dict[str, SynchronizationSummary]:
         """Send every pending reading and action whose node the registry places.
@@ -294,6 +314,40 @@ class TelemetrySynchronizationApplicationService:
                 self.actuation_event_repository, devices, self.telemetry_gateway.send_actuation_event
             ),
         }
+
+    def purge(self) -> int:
+        """Delete the readings and actions the cloud answered long ago.
+
+        Synchronized records go after ``synced_retention`` and rejected ones
+        after ``rejected_retention``, counted from the moment the Edge received
+        them. Pending records are never deleted. It runs at most once an hour.
+
+        Returns:
+            How many records were deleted.
+        """
+        now = self.clock()
+        if self._last_purge is not None and now - self._last_purge < PURGE_INTERVAL:
+            return 0
+        self._last_purge = now
+        deleted = 0
+        for status, retention in (
+            (SyncStatus.SYNCED, self.synced_retention),
+            (SyncStatus.REJECTED, self.rejected_retention),
+        ):
+            for repository in (self.telemetry_reading_repository, self.actuation_event_repository):
+                deleted += self._delete_in_batches(repository, status, now - retention)
+        if deleted:
+            LOGGER.info("Deleted %d old synchronized or rejected records", deleted)
+        return deleted
+
+    def _delete_in_batches(self, repository, status: SyncStatus, cutoff: datetime) -> int:
+        deleted = 0
+        while True:
+            count = repository.delete_before(status, cutoff, PURGE_BATCH_SIZE)
+            deleted += count
+            if count < PURGE_BATCH_SIZE:
+                return deleted
+            self.sleep(PURGE_PAUSE_SECONDS)
 
     def _synchronize(self, repository, devices: dict[str, MonitoredDevice], send) -> SynchronizationSummary:
         synced = rejected = waiting = 0

@@ -1,6 +1,7 @@
 """Repository abstractions for the Tracking bounded context."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, MonitoredDevice, TelemetryReading
@@ -82,6 +83,14 @@ class TelemetryReadingRepository(Protocol):
         """Count the stored readings of each synchronization status."""
         ...
 
+    def delete_before(self, status: SyncStatus, cutoff: datetime, limit: int) -> int:
+        """Delete up to ``limit`` readings of ``status`` received before ``cutoff``.
+
+        Returns:
+            How many were deleted; fewer than ``limit`` when none are left.
+        """
+        ...
+
 
 class ActuationEventRepository(Protocol):
     """Persistence contract for the actions the Edge received."""
@@ -104,4 +113,12 @@ class ActuationEventRepository(Protocol):
 
     def count_by_sync_status(self) -> dict[SyncStatus, int]:
         """Count the stored actions of each synchronization status."""
+        ...
+
+    def delete_before(self, status: SyncStatus, cutoff: datetime, limit: int) -> int:
+        """Delete up to ``limit`` actions of ``status`` received before ``cutoff``.
+
+        Returns:
+            How many were deleted; fewer than ``limit`` when none are left.
+        """
         ...

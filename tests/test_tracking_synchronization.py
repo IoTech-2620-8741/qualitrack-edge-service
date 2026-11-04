@@ -1,9 +1,14 @@
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
 from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.application.services import SynchronizationSummary, TelemetrySynchronizationApplicationService
+from tracking.application.services import (
+    PURGE_PAUSE_SECONDS,
+    SynchronizationSummary,
+    TelemetrySynchronizationApplicationService,
+)
 from tracking.domain.entities import ActuationEvent, MonitoredDevice, ReportingDevice, TelemetryReading
 from tracking.domain.enums import (
     ActuationAction,
@@ -34,6 +39,21 @@ def stored_event(event_id):
     event = ActuationEvent.record(CONTAINER, ActuationAction.VENTILATION_ON, Metric.TEMPERATURE,
                                   EnvironmentalState.WARNING, ActuationResult.EXECUTED, NOW, 3, NOW)
     return event.with_persistence_id(event_id)
+
+
+def received_reading(reading_id, status, days_ago):
+    received_at = NOW - timedelta(days=days_ago)
+    reading = TelemetryReading.record(ENVIRONMENTAL, Metric.AIR_QUALITY, 400.0, received_at, None, received_at)
+    reading = reading.with_persistence_id(reading_id)
+    return reading if status is SyncStatus.PENDING else reading.synchronized(status)
+
+
+def received_event(event_id, status, days_ago):
+    received_at = NOW - timedelta(days=days_ago)
+    event = ActuationEvent.record(CONTAINER, ActuationAction.VENTILATION_ON, Metric.TEMPERATURE,
+                                  EnvironmentalState.WARNING, ActuationResult.EXECUTED, received_at, None, received_at)
+    event = event.with_persistence_id(event_id)
+    return event if status is SyncStatus.PENDING else event.synchronized(status)
 
 
 class SynchronizedTestCase(unittest.TestCase):
@@ -134,6 +154,12 @@ class InMemoryRecords:
     def status_of(self, record_id):
         return self.records[record_id].sync_status
 
+    def delete_before(self, status, cutoff, limit):
+        doomed = [i for i, r in sorted(self.records.items()) if r.sync_status is status and r.received_at < cutoff]
+        for record_id in doomed[:limit]:
+            del self.records[record_id]
+        return len(doomed[:limit])
+
 
 class InMemoryDevices:
     def __init__(self, *devices):
@@ -204,6 +230,63 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
             TelemetrySynchronizationApplicationService(None, self.devices, self.readings, self.events).synchronize_pending()
+
+
+class PurgeTestCase(unittest.TestCase):
+    def setUp(self):
+        self.now = NOW
+        self.pauses = []
+        self.readings = InMemoryRecords(
+            received_reading(1, SyncStatus.SYNCED, days_ago=8),
+            received_reading(2, SyncStatus.SYNCED, days_ago=6),
+            received_reading(3, SyncStatus.REJECTED, days_ago=91),
+            received_reading(4, SyncStatus.REJECTED, days_ago=89),
+            received_reading(5, SyncStatus.PENDING, days_ago=365),
+        )
+        self.events = InMemoryRecords(
+            received_event(1, SyncStatus.SYNCED, days_ago=8),
+            received_event(2, SyncStatus.REJECTED, days_ago=91),
+            received_event(3, SyncStatus.PENDING, days_ago=365),
+        )
+
+    def service(self):
+        return TelemetrySynchronizationApplicationService(
+            None, InMemoryDevices(), self.readings, self.events,
+            clock=lambda: self.now, sleep=self.pauses.append,
+        )
+
+    def test_deletes_the_synchronized_after_7_days_and_the_rejected_after_90_and_never_the_pending(self):
+        deleted = self.service().purge()
+
+        self.assertEqual(deleted, 4)
+        self.assertEqual(sorted(self.readings.records), [2, 4, 5])
+        self.assertEqual(sorted(self.events.records), [3])
+
+    def test_deletes_in_batches_with_a_pause_between_them(self):
+        self.readings = InMemoryRecords(*(received_reading(i, SyncStatus.SYNCED, days_ago=10) for i in range(1, 6)))
+
+        with patch("tracking.application.services.PURGE_BATCH_SIZE", 2):
+            deleted = self.service().purge()
+
+        self.assertEqual(deleted, 7)
+        self.assertEqual(self.readings.records, {})
+        self.assertEqual(self.pauses, [PURGE_PAUSE_SECONDS, PURGE_PAUSE_SECONDS])
+
+    def test_runs_at_most_once_an_hour(self):
+        service = self.service()
+        self.assertEqual(service.purge(), 4)
+        self.readings.records[6] = received_reading(6, SyncStatus.SYNCED, days_ago=10)
+
+        self.now = NOW + timedelta(minutes=59)
+        self.assertEqual(service.purge(), 0)
+        self.assertIn(6, self.readings.records)
+
+        self.now = NOW + timedelta(hours=1)
+        self.assertEqual(service.purge(), 1)
+        self.assertNotIn(6, self.readings.records)
+
+    def test_needs_no_connection_with_the_cloud(self):
+        self.assertEqual(self.service().purge(), 4)
 
 
 if __name__ == "__main__":
