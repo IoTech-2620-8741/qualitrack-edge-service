@@ -193,9 +193,17 @@ settings and does not supply defaults for missing ones.
 | `CLOUD_USERNAME` | E-mail of the operator account the Edge signs in with |
 | `CLOUD_PASSWORD` | Password of that account; keep it out of version control |
 | `CLOUD_SYNC_INTERVAL_SECONDS` | Seconds between two synchronizations of the background thread |
+| `SYNCED_RETENTION_DAYS` | Optional, 7 by default. Days the Edge keeps a reading or action after the cloud accepted it; then it deletes it |
+| `REJECTED_RETENTION_DAYS` | Optional, 90 by default. Days the Edge keeps a reading or action the cloud refused for good; then it deletes it |
 
 The cloud settings other than `CLOUD_SYNC_ENABLED` are required only when the
 synchronization is enabled.
+
+While the synchronization is enabled, the background thread also deletes the
+old `SYNCED` and `REJECTED` readings and actions (at most once an hour, in
+short batches). Pending records are never deleted, so the database still grows
+if the cloud cannot take them; `flask --app app cloud pending` shows how many
+there are.
 
 ### 4. Connect the Edge with the cloud
 
@@ -240,6 +248,9 @@ flask --app app cloud profiles
    - Cloud not reachable, a server error or a rejected operator account: the
      synchronization stops, the records keep their state and the next cycle
      retries them.
+4. It deletes the records that became `SYNCED` more than
+   `SYNCED_RETENTION_DAYS` ago and the `REJECTED` ones older than
+   `REJECTED_RETENTION_DAYS`, counted from the moment the Edge received them.
 
 ### 5. Register the nodes
 
