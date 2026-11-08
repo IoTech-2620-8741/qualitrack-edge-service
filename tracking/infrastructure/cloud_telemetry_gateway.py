@@ -31,6 +31,28 @@ def _environment_path(device: MonitoredDevice) -> str:
 def _container_monitor_path(device: MonitoredDevice) -> str:
     return f"{_environment_path(device)}/container-monitors/{device.cloud_device_id}"
 
+def _reading_payload(reading: TelemetryReading) -> dict:
+    """Build the cloud resource for a telemetry reading."""
+    return {
+        "metric": reading.metric.value,
+        "value": reading.value,
+        "textValue": reading.text_value,
+        "measuredAt": _iso(reading.measured_at.value),
+        "profileVersion": (None if reading.profile_version is None else reading.profile_version.value),
+    }
+
+
+def _actuation_payload(event: ActuationEvent) -> dict:
+    """Build the cloud resource for an actuation event."""
+    return {
+        "action": event.action.value,
+        "triggerMetric": (None if event.trigger_metric is None else event.trigger_metric.value),
+        "triggerState": (None if event.trigger_state is None else event.trigger_state.value),
+        "result": event.result.value,
+        "occurredAt": _iso(event.occurred_at.value),
+        "profileVersion": (None if event.profile_version is None else event.profile_version.value),
+    }
+
 
 class CloudTelemetryGateway:
     """Send readings and actions to the cloud with the session of the Edge."""
@@ -44,26 +66,11 @@ class CloudTelemetryGateway:
             path = f"{_environment_path(device)}/telemetry-measurements"
         else:
             path = f"{_container_monitor_path(device)}/telemetry-measurements"
-        body = {
-            "metric": reading.metric.value,
-            "value": reading.value,
-            "textValue": reading.text_value,
-            "measuredAt": _iso(reading.measured_at.value),
-            "profileVersion": None if reading.profile_version is None else reading.profile_version.value,
-        }
-        return self._send(path, body, f"reading {reading.id}")
+        return self._send(path, _reading_payload(reading), f"reading {reading.id}")
 
     def send_actuation_event(self, device: MonitoredDevice, event: ActuationEvent) -> SyncStatus:
         """Send an action of a container monitor (TS63)."""
-        body = {
-            "action": event.action.value,
-            "triggerMetric": None if event.trigger_metric is None else event.trigger_metric.value,
-            "triggerState": None if event.trigger_state is None else event.trigger_state.value,
-            "result": event.result.value,
-            "occurredAt": _iso(event.occurred_at.value),
-            "profileVersion": None if event.profile_version is None else event.profile_version.value,
-        }
-        return self._send(f"{_container_monitor_path(device)}/actuation-events", body, f"action {event.id}")
+        return self._send(f"{_container_monitor_path(device)}/actuation-events", _actuation_payload(event), f"action {event.id}")
 
     def _send(self, path: str, body: dict, record: str) -> SyncStatus:
         response = self._cloud_session.request("POST", path, json=body)

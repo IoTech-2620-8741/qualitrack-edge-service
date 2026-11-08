@@ -231,6 +231,26 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
         with self.assertRaises(CloudSynchronizationDisabled):
             TelemetrySynchronizationApplicationService(None, self.devices, self.readings, self.events).synchronize_pending()
 
+    def test_retries_actuation_after_cloud_outage(self):
+        """Keep an action pending until Cloud becomes available."""
+        self.devices = InMemoryDevices(
+            placed("CNT-001",DeviceType.CONTAINER_MONITOR,environment_id=2,cloud_device_id=16)
+        )
+        self.readings = InMemoryRecords()
+        self.events = InMemoryRecords(stored_event(1))
+
+        class OfflineGateway(FakeTelemetryGateway):
+            def send_actuation_event(self, device, event):
+                raise CloudUnavailableError("offline")
+        with self.assertRaises(CloudUnavailableError):
+            self.service(OfflineGateway()).synchronize_pending()
+
+        self.assertEqual(self.events.status_of(1),SyncStatus.PENDING)
+        result = self.service(FakeTelemetryGateway()).synchronize_pending()
+        self.assertEqual(result["actuation_events"].synced,1)
+        self.assertEqual(self.events.status_of(1),SyncStatus.SYNCED)
+
+
 
 class PurgeTestCase(unittest.TestCase):
     def setUp(self):
@@ -287,6 +307,21 @@ class PurgeTestCase(unittest.TestCase):
 
     def test_needs_no_connection_with_the_cloud(self):
         self.assertEqual(self.service().purge(), 4)
+
+
+    def test_retries_purge_after_repository_failure(self):
+        """Retry cleanup when a previous purge did not finish."""
+        service = self.service()
+
+        with patch.object(self.readings, "delete_before", side_effect=RuntimeError("SQLite temporarily unavailable")):
+            with self.assertRaises(RuntimeError):
+                service.purge()
+
+        deleted = service.purge()
+
+        self.assertEqual(deleted, 4)
+        self.assertEqual(sorted(self.readings.records), [2, 4, 5])
+        self.assertEqual(sorted(self.events.records), [3])
 
 
 if __name__ == "__main__":

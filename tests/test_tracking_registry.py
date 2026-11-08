@@ -110,6 +110,17 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
         with self.assertRaises(CloudRejectedError):
             CloudDeviceRegistryGateway(FakeCloudSession(FakeResponse(404))).fetch_devices()
 
+    def test_rejects_malformed_equipment_lists(self):
+        """Reject unexpected equipment list structures."""
+        invalid_payloads = [{"equipments": []},[None],["invalid-device"]]
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                session = FakeCloudSession(FakeResponse(200, payload))
+
+                with self.assertRaises(CloudRejectedError):
+                    CloudDeviceRegistryGateway(session).fetch_devices()
+
 
 class FakeRegistryGateway:
     def __init__(self, *answers):
@@ -191,6 +202,33 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
             DeviceRegistryApplicationService(None, FakeLayer(), self.repository).synchronize_registry()
+
+
+    def test_malformed_cloud_registry_preserves_local_devices(self):
+        """Keep the previous registry when Cloud returns invalid data."""
+        self.repository.replace_all([
+            monitored("ENV-001"),
+        ])
+
+        session = FakeCloudSession(
+            FakeResponse(200, {"equipments": []})
+        )
+
+        service = DeviceRegistryApplicationService(
+            CloudDeviceRegistryGateway(session),
+            FakeLayer("ENV-001"),
+            self.repository,
+        )
+
+        with self.assertRaises(CloudRejectedError):
+            service.synchronize_registry()
+
+        stored_devices = service.monitored_devices()
+
+        self.assertEqual(
+            [device.device_id for device in stored_devices],
+            ["ENV-001"],
+        )
 
 
 class CloudSyncSchedulerTestCase(unittest.TestCase):
