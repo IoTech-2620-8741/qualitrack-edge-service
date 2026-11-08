@@ -58,7 +58,7 @@ PURGE_INTERVAL = timedelta(hours=1)
 
 
 class TelemetryApplicationService:
-    """Accept the readings and actions of the nodes and keep them pending (TS55–TS57, TS60).
+    """Accept the readings and actions of the nodes and keep them pending.
 
     The service asks the Tracking-to-IAM anti-corruption layer to authenticate
     the node, checks that its type sends that telemetry, creates the records
@@ -253,7 +253,7 @@ class SynchronizationSummary:
 
 
 class TelemetrySynchronizationApplicationService:
-    """Send the pending readings and actions to the cloud (TS61, TS62, TS63).
+    """Send the pending readings and actions to the cloud
 
     Records are sent oldest first, each to the cloud route of its node, which
     the local copy of the cloud registry provides. A record whose node the
@@ -328,7 +328,6 @@ class TelemetrySynchronizationApplicationService:
         now = self.clock()
         if self._last_purge is not None and now - self._last_purge < PURGE_INTERVAL:
             return 0
-        self._last_purge = now
         deleted = 0
         for status, retention in (
             (SyncStatus.SYNCED, self.synced_retention),
@@ -336,6 +335,7 @@ class TelemetrySynchronizationApplicationService:
         ):
             for repository in (self.telemetry_reading_repository, self.actuation_event_repository):
                 deleted += self._delete_in_batches(repository, status, now - retention)
+        self._last_purge = now
         if deleted:
             LOGGER.info("Deleted %d old synchronized or rejected records", deleted)
         return deleted
@@ -402,7 +402,7 @@ class EnvironmentalProfileApplicationService:
         )
 
     def synchronize_profiles(self) -> list[EnvironmentalProfile]:
-        """Copy the profile of every node the registry places in an environment (TS64).
+        """Copy the profile of every node the registry places in an environment.
 
         A node without a profile in the cloud loses its local copy, as does a
         node the registry no longer has.
@@ -426,7 +426,7 @@ class EnvironmentalProfileApplicationService:
         return profiles
 
     def configuration_for(self, device_id: str, api_key: str) -> NodeConfiguration:
-        """Return the configuration a node applies (TS58, TS59).
+        """Return the configuration a node applies.
 
         Raises:
             DeviceAuthenticationFailed: IAM rejects the node's credentials.
