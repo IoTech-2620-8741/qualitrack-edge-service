@@ -231,6 +231,26 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
         with self.assertRaises(CloudSynchronizationDisabled):
             TelemetrySynchronizationApplicationService(None, self.devices, self.readings, self.events).synchronize_pending()
 
+    def test_retries_actuation_after_cloud_outage(self):
+        """Keep an action pending until Cloud becomes available."""
+        self.devices = InMemoryDevices(
+            placed("CNT-001",DeviceType.CONTAINER_MONITOR,environment_id=2,cloud_device_id=16)
+        )
+        self.readings = InMemoryRecords()
+        self.events = InMemoryRecords(stored_event(1))
+
+        class OfflineGateway(FakeTelemetryGateway):
+            def send_actuation_event(self, device, event):
+                raise CloudUnavailableError("offline")
+        with self.assertRaises(CloudUnavailableError):
+            self.service(OfflineGateway()).synchronize_pending()
+
+        self.assertEqual(self.events.status_of(1),SyncStatus.PENDING)
+        result = self.service(FakeTelemetryGateway()).synchronize_pending()
+        self.assertEqual(result["actuation_events"].synced,1)
+        self.assertEqual(self.events.status_of(1),SyncStatus.SYNCED)
+
+
 
 class PurgeTestCase(unittest.TestCase):
     def setUp(self):
