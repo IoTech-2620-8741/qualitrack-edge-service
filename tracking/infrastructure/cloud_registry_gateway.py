@@ -35,8 +35,19 @@ class CloudDeviceRegistryGateway:
                 f"The cloud answered {response.status_code} to the equipment list",
                 response.status_code,
             )
+
+        try:
+            resources = response.json()
+        except ValueError as error:
+            raise CloudRejectedError("The cloud returned invalid equipment JSON") from error
+        if not isinstance(resources, list):
+            raise CloudRejectedError("The cloud equipment list must be a JSON array")
+        if any(not isinstance(resource, dict) for resource in resources):
+            raise CloudRejectedError("The cloud equipment list contains invalid entries")
+
         synced_at = datetime.now(UTC)
         devices = []
+
         for resource in response.json():
             device = self._to_monitored_device(resource, synced_at)
             if device is not None:
