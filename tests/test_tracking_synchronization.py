@@ -289,5 +289,20 @@ class PurgeTestCase(unittest.TestCase):
         self.assertEqual(self.service().purge(), 4)
 
 
+    def test_retries_purge_after_repository_failure(self):
+        """Retry cleanup when a previous purge did not finish."""
+        service = self.service()
+
+        with patch.object(self.readings, "delete_before", side_effect=RuntimeError("SQLite temporarily unavailable")):
+            with self.assertRaises(RuntimeError):
+                service.purge()
+
+        deleted = service.purge()
+
+        self.assertEqual(deleted, 4)
+        self.assertEqual(sorted(self.readings.records), [2, 4, 5])
+        self.assertEqual(sorted(self.events.records), [3])
+
+
 if __name__ == "__main__":
     unittest.main()
