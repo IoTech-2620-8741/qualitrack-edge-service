@@ -12,6 +12,7 @@ import requests
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
 from tracking.domain.entities import ActuationEvent, MonitoredDevice, TelemetryReading
 from tracking.domain.enums import DeviceType, SyncStatus
+from urllib.parse import quote
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,12 +62,27 @@ class CloudTelemetryGateway:
         self._cloud_session = cloud_session
 
     def send_reading(self, device: MonitoredDevice, reading: TelemetryReading) -> SyncStatus:
-        """Send a reading of the environmental device (TS61) or a container monitor (TS62)."""
-        if device.device_type is DeviceType.ENVIRONMENTAL_DEVICE:
-            path = f"{_environment_path(device)}/telemetry-measurements"
-        else:
-            path = f"{_container_monitor_path(device)}/telemetry-measurements"
-        return self._send(path, _reading_payload(reading), f"reading {reading.id}")
+        """Synchronize an IoT reading through the authenticated Edge Gateway.
+
+        Uses the Gateway external identifier and the cloud Equipment ID
+        of the reporting device to construct the telemetry endpoint.
+
+        The cloud validates that the IoT device belongs to the
+        authenticated Gateway's laboratory and environment.
+
+        Args:
+            device: IoT device registered in the local cloud registry.
+            reading: Pending telemetry reading stored in SQLite.
+
+        Returns:
+            SYNCED when the cloud accepts the reading or REJECTED
+            when it permanently refuses the measurement.
+        """
+        gateway_id = quote(self._cloud_session.device_id, safe="")
+
+        path = f"/api/v1/edge-gateways/{gateway_id}" f"/iot-devices/{device.cloud_device_id}" "/telemetry-measurements"
+
+        return self._send(path, _reading_payload(reading),f"reading {reading.id}")
 
     def send_actuation_event(self, device: MonitoredDevice, event: ActuationEvent) -> SyncStatus:
         """Send an action of a container monitor (TS63)."""
