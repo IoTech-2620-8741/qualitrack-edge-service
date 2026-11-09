@@ -21,6 +21,7 @@ class AppConfig(TypedDict):
     CLOUD_USERNAME: str | None
     CLOUD_PASSWORD: str | None
     CLOUD_SYNC_INTERVAL_SECONDS: int | None
+    CLOUD_ENVIRONMENT_IDS: tuple[int, ...]
     SYNCED_RETENTION_DAYS: int
     REJECTED_RETENTION_DAYS: int
 
@@ -117,6 +118,7 @@ def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
             "CLOUD_USERNAME": None,
             "CLOUD_PASSWORD": None,
             "CLOUD_SYNC_INTERVAL_SECONDS": None,
+            "CLOUD_ENVIRONMENT_IDS": (),
         }
 
     url = _required(values, "CLOUD_API_URL").strip().rstrip("/")
@@ -141,7 +143,28 @@ def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
         "CLOUD_USERNAME": username,
         "CLOUD_PASSWORD": password,
         "CLOUD_SYNC_INTERVAL_SECONDS": interval,
+        "CLOUD_ENVIRONMENT_IDS": _environment_ids(values.get("CLOUD_ENVIRONMENT_IDS")),
     }
+
+
+def _environment_ids(setting: str | None) -> tuple[int, ...]:
+    """Return the cloud environments this station serves, empty for the whole laboratory (ADR-0013).
+
+    The setting is a comma-separated list of positive integers, such as ``3`` or ``3,5``.
+    """
+    if setting is None or not setting.strip():
+        return ()
+    identifiers = []
+    for part in setting.split(","):
+        try:
+            identifier = int(part.strip())
+        except ValueError as error:
+            raise ValueError("CLOUD_ENVIRONMENT_IDS must be a comma-separated list of integers") from error
+        if identifier < 1:
+            raise ValueError("CLOUD_ENVIRONMENT_IDS must contain identifiers from 1")
+        if identifier not in identifiers:
+            identifiers.append(identifier)
+    return tuple(identifiers)
 
 def _retention_days(values: dict[str, str], name: str, default: int) -> int:
     """Return the days the Edge keeps a synchronized or rejected record, ``default`` when unset."""
