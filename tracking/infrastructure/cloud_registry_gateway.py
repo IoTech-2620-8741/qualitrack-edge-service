@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
 from tracking.domain.entities import MonitoredDevice
 from tracking.domain.enums import DeviceStatus, DeviceType
+from urllib.parse import quote
 
 LOGGER = logging.getLogger(__name__)
 
@@ -21,37 +22,73 @@ class CloudDeviceRegistryGateway:
         self._cloud_session = cloud_session
 
     def fetch_devices(self) -> list[MonitoredDevice]:
-        """Return the nodes the cloud registers for the Edge.
+        """Retrieve IoT devices assigned to the authenticated Gateway.
 
-        Equipment without an IoT device type or without the identifier the
-        Edge recognises (``sensorExternalId``) is not a node, so it is left out.
+        Requests only the environmental devices and container
+        monitors registered in the Gateway's current environment.
+
+        The Edge Gateway identity is obtained from CloudSession.
+
+        Returns:
+            Monitored devices authorized for the Gateway.
+
+        Raises:
+            CloudRejectedError: If the cloud returns an invalid
+                response or an unexpected status.
+            CloudUnavailableError: If the cloud cannot be reached.
         """
-        laboratory_id = self._cloud_session.laboratory_id()
-        response = self._cloud_session.request(
-            "GET", f"/api/v1/laboratories/{laboratory_id}/equipments"
+        device_id = quote(
+            self._cloud_session.device_id,
+            safe="",
         )
+
+        response = self._cloud_session.request(
+            "GET",
+            f"/api/v1/edge-gateways/{device_id}/iot-devices",
+        )
+
         if response.status_code != 200:
             raise CloudRejectedError(
-                f"The cloud answered {response.status_code} to the equipment list",
+                f"The cloud answered {response.status_code} "
+                "to the Gateway device registry",
                 response.status_code,
             )
 
         try:
             resources = response.json()
         except ValueError as error:
-            raise CloudRejectedError("The cloud returned invalid equipment JSON") from error
+            raise CloudRejectedError(
+                "The cloud returned invalid device registry JSON"
+            ) from error
+
         if not isinstance(resources, list):
-            raise CloudRejectedError("The cloud equipment list must be a JSON array")
-        if any(not isinstance(resource, dict) for resource in resources):
-            raise CloudRejectedError("The cloud equipment list contains invalid entries")
+            raise CloudRejectedError(
+                "The cloud device registry must be a JSON array"
+            )
+
+        if any(not isinstance(item, dict) for item in resources):
+            raise CloudRejectedError(
+                "The cloud device registry contains invalid entries"
+            )
 
         synced_at = datetime.now(UTC)
         devices = []
 
-        for resource in response.json():
-            device = self._to_monitored_device(resource, synced_at)
+        for resource in resources:
+            device = self._to_monitored_device(
+                resource,
+                synced_at,
+            )
+
             if device is not None:
                 devices.append(device)
+
+        LOGGER.info(
+            "Retrieved %d IoT devices for Gateway %s",
+            len(devices),
+            self._cloud_session.device_id,
+        )
+
         return devices
 
     @staticmethod
