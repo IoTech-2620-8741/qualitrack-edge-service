@@ -63,8 +63,8 @@ def create_app() -> Flask:
     if app.config["CLOUD_SYNC_ENABLED"]:
         cloud_session = CloudSession(
             app.config["CLOUD_API_URL"],
-            app.config["CLOUD_USERNAME"],
-            app.config["CLOUD_PASSWORD"],
+            app.config["CLOUD_DEVICE_ID"],
+            app.config["CLOUD_API_KEY"],
         )
         registry_gateway = CloudDeviceRegistryGateway(cloud_session)
         profile_gateway = CloudProfileGateway(cloud_session)
