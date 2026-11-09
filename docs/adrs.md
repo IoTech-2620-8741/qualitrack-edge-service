@@ -344,6 +344,7 @@ and rotates its logs. CI runs the compose file and builds the image for
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
+- **Amended by**: ADR-0013, which can read only the environments of the station
 
 ### Context
 
@@ -425,4 +426,44 @@ a moment only. It is active by default.
   and stops the nodes from sending.
 - A size limit on the database instead of an age, which would delete
   `PENDING` records or need a rule to choose which ones.
+
+## ADR-0013: Read the devices of the environments the station serves
+
+- **Status**: Accepted
+- **Date**: 2026-11-08
+- **Amends**: ADR-0011
+
+### Context
+
+In the review of the Edge, the course asked for the devices to be read per
+environment and not per laboratory. ADR-0011 already keeps only the nodes
+registered in the Edge, but the Edge still downloads the equipment of the
+whole laboratory every cycle. The cloud now lists the equipment of one
+environment (`GET /laboratories/{laboratoryId}/environments/{environmentId}/equipments`),
+and `?iot=true` keeps only its IoT devices.
+
+### Decision
+
+The optional setting `CLOUD_ENVIRONMENT_IDS` lists the cloud environments the
+station serves, such as `3` or `3,5`. When it is set, the registry asks the
+cloud for the IoT devices of each of those environments only. When it is
+empty, the registry reads the equipment of the laboratory, as before. In both
+cases Tracking keeps only the nodes registered in this Edge (ADR-0011). If the
+cloud refuses one environment (for example, 403 for an environment of another
+laboratory), the registry of that cycle stops and the local copy is kept.
+
+### Consequences
+
+- A station with its environments set downloads only their devices, whatever
+  the size of the laboratory.
+- Stations that do not set it keep working without changes.
+- A node the cloud moves to an environment the station does not list leaves
+  the local registry until the setting is updated; its records wait as
+  `PENDING`.
+
+### Alternatives considered
+
+- Making the setting required, which breaks the stations already deployed.
+- Filtering the laboratory list by environment in the Edge, which still
+  downloads the equipment of the whole laboratory.
 

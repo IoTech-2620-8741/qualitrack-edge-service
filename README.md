@@ -193,6 +193,7 @@ settings and does not supply defaults for missing ones.
 | `CLOUD_USERNAME` | E-mail of the operator account the Edge signs in with |
 | `CLOUD_PASSWORD` | Password of that account; keep it out of version control |
 | `CLOUD_SYNC_INTERVAL_SECONDS` | Seconds between two synchronizations of the background thread |
+| `CLOUD_ENVIRONMENT_IDS` | Optional. Cloud environments this station serves, such as `3` or `3,5`; the Edge reads only their IoT devices. Empty reads the equipment of the whole laboratory (ADR-0013) |
 | `SYNCED_RETENTION_DAYS` | Optional, 7 by default. Days the Edge keeps a reading or action after the cloud accepted it; then it deletes it |
 | `REJECTED_RETENTION_DAYS` | Optional, 90 by default. Days the Edge keeps a reading or action the cloud refused for good; then it deletes it |
 
@@ -228,7 +229,9 @@ flask --app app cloud profiles
    Edge neither keeps them nor reads their profiles. `cloud devices` lists this
    local copy with the environment and cloud identifier of each node, and
    `cloud sync` names the nodes registered in this Edge that the cloud does not
-   have, for example because of a different `sensorExternalId`.
+   have, for example because of a different `sensorExternalId`. With
+   `CLOUD_ENVIRONMENT_IDS` set, it reads only the IoT devices of those
+   environments instead of the equipment of the whole laboratory.
 2. It copies the environmental profile of every node placed in an
    environment (`/laboratories/{id}/environments/{id}/devices/{id}/environmental-profile`):
    the profile of the environment for the environmental device, and the
