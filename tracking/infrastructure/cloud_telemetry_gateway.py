@@ -85,8 +85,24 @@ class CloudTelemetryGateway:
         return self._send(path, _reading_payload(reading),f"reading {reading.id}")
 
     def send_actuation_event(self, device: MonitoredDevice, event: ActuationEvent) -> SyncStatus:
-        """Send an action of a container monitor (TS63)."""
-        return self._send(f"{_container_monitor_path(device)}/actuation-events", _actuation_payload(event), f"action {event.id}")
+        """Synchronize a container monitor actuation event through its Edge Gateway.
+
+        Uses the Gateway API key to send an actuation event to the cloud
+        Equipment identified by device.cloud_device_id.
+
+        Args:
+            device: Container monitor registered in the cloud device registry.
+            event: Actuation event stored locally and awaiting synchronization.
+
+        Returns:
+            SyncStatus.SYNCED if the cloud accepts the event, or
+            SyncStatus.REJECTED if it permanently rejects the event.
+        """
+        gateway_id = quote(self._cloud_session.device_id, safe="")
+
+        path = f"/api/v1/edge-gateways/{gateway_id}"f"/iot-devices/{device.cloud_device_id}""/actuation-events"
+
+        return self._send(path, _actuation_payload(event),f"action {event.id}")
 
     def _send(self, path: str, body: dict, record: str) -> SyncStatus:
         response = self._cloud_session.request("POST", path, json=body)
