@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Settings `SYNCED_RETENTION_DAYS` and `REJECTED_RETENTION_DAYS`, both optional integers from 1 (ADR-0012).
 
+- Tracking (tracking): with the optional setting `CLOUD_ENVIRONMENT_IDS` (for example `3,5`), the device registry asks the cloud for the IoT devices of those environments only (`/environments/{environmentId}/equipments?iot=true`) instead of the equipment of the whole laboratory. Empty keeps the laboratory list, and the Edge still keeps only the nodes registered in it (ADR-0013).
+
 ## [0.2.0] - 2026-11-03
 
 ### Changed

@@ -66,7 +66,7 @@ def create_app() -> Flask:
             app.config["CLOUD_DEVICE_ID"],
             app.config["CLOUD_API_KEY"],
         )
-        registry_gateway = CloudDeviceRegistryGateway(cloud_session)
+        registry_gateway = CloudDeviceRegistryGateway(cloud_session, app.config.get("CLOUD_ENVIRONMENT_IDS", ()))
         profile_gateway = CloudProfileGateway(cloud_session)
         telemetry_gateway = CloudTelemetryGateway(cloud_session)
     device_registry_service = DeviceRegistryApplicationService(registry_gateway, iam_anti_corruption_layer)

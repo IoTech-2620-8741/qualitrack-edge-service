@@ -33,6 +33,7 @@ class FakeResponse:
 class FakeCloudSession:
     def __init__(self, response):
         self.response = response
+        self.answers = {}
         self.requests = []
 
     def laboratory_id(self):
@@ -40,7 +41,7 @@ class FakeCloudSession:
 
     def request(self, method, path, json=None):
         self.requests.append((method, path))
-        return self.response
+        return self.answers.get(path, self.response)
 
 
 def equipment(**overrides):
@@ -105,6 +106,30 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
         self.assertEqual(container.cloud_device_id, 16)
         self.assertIsNone(container.environment_id)
         self.assertEqual(container.status, DeviceStatus.MAINTENANCE)
+
+    def test_reads_only_the_iot_devices_of_the_configured_environments(self):
+        session = FakeCloudSession(FakeResponse(200, [equipment()]))
+        session.answers = {
+            "/api/v1/laboratories/7/environments/2/equipments?iot=true": FakeResponse(200, [equipment()]),
+            "/api/v1/laboratories/7/environments/5/equipments?iot=true": FakeResponse(200, [
+                equipment(id=16, environmentId=5, deviceType="CONTAINER_MONITOR", sensorExternalId="CNT-001"),
+            ]),
+        }
+
+        devices = CloudDeviceRegistryGateway(session, (2, 5)).fetch_devices()
+
+        self.assertEqual(session.requests, [
+            ("GET", "/api/v1/laboratories/7/environments/2/equipments?iot=true"),
+            ("GET", "/api/v1/laboratories/7/environments/5/equipments?iot=true"),
+        ])
+        self.assertEqual([(device.device_id, device.environment_id) for device in devices], [("ENV-001", 2), ("CNT-001", 5)])
+
+    def test_an_environment_the_cloud_refuses_stops_the_registry(self):
+        session = FakeCloudSession(FakeResponse(200, [equipment()]))
+        session.answers = {"/api/v1/laboratories/7/environments/9/equipments?iot=true": FakeResponse(403)}
+
+        with self.assertRaises(CloudRejectedError):
+            CloudDeviceRegistryGateway(session, (2, 9)).fetch_devices()
 
     def test_reports_an_unexpected_answer(self):
         with self.assertRaises(CloudRejectedError):
