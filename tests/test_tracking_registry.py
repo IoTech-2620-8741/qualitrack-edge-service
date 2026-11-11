@@ -30,18 +30,18 @@ class FakeResponse:
         return self._body
 
 
+
 class FakeCloudSession:
     def __init__(self, response):
         self.response = response
         self.answers = {}
         self.requests = []
-
-    def laboratory_id(self):
-        return 7
+        self.device_id = "EDGE-001"
 
     def request(self, method, path, json=None):
         self.requests.append((method, path))
         return self.answers.get(path, self.response)
+
 
 
 def equipment(**overrides):
@@ -84,7 +84,7 @@ class MonitoredDeviceTestCase(unittest.TestCase):
 
 
 class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
-    def test_translates_the_iot_devices_of_the_laboratory(self):
+    def test_translates_the_iot_devices_of_the_gateway(self):
         session = FakeCloudSession(FakeResponse(200, [
             equipment(),
             equipment(id=16, environmentId=None, deviceType="CONTAINER_MONITOR",
@@ -99,7 +99,7 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
 
         self.assertIn("Skipped the cloud device ENV-009", logs.output[0])
 
-        self.assertEqual(session.requests, [("GET", "/api/v1/laboratories/7/equipments")])
+        self.assertEqual(session.requests, [("GET", "/api/v1/edge-gateways/EDGE-001/iot-devices")])
         self.assertEqual([device.device_id for device in devices], ["ENV-001", "CNT-001"])
         container = devices[1]
         self.assertEqual(container.device_type, DeviceType.CONTAINER_MONITOR)
@@ -107,29 +107,30 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
         self.assertIsNone(container.environment_id)
         self.assertEqual(container.status, DeviceStatus.MAINTENANCE)
 
-    def test_reads_only_the_iot_devices_of_the_configured_environments(self):
-        session = FakeCloudSession(FakeResponse(200, [equipment()]))
-        session.answers = {
-            "/api/v1/laboratories/7/environments/2/equipments?iot=true": FakeResponse(200, [equipment()]),
-            "/api/v1/laboratories/7/environments/5/equipments?iot=true": FakeResponse(200, [
-                equipment(id=16, environmentId=5, deviceType="CONTAINER_MONITOR", sensorExternalId="CNT-001"),
-            ]),
-        }
+    def test_reads_the_iot_devices_assigned_to_the_gateway(self):
+        session = FakeCloudSession(FakeResponse(200, [
+            equipment(),
+            equipment(
+                id=16,
+                environmentId=2,
+                deviceType="CONTAINER_MONITOR",
+                sensorExternalId="CNT-001",
+            ),
+        ]))
 
-        devices = CloudDeviceRegistryGateway(session, (2, 5)).fetch_devices()
+        devices = CloudDeviceRegistryGateway(session).fetch_devices()
 
-        self.assertEqual(session.requests, [
-            ("GET", "/api/v1/laboratories/7/environments/2/equipments?iot=true"),
-            ("GET", "/api/v1/laboratories/7/environments/5/equipments?iot=true"),
-        ])
-        self.assertEqual([(device.device_id, device.environment_id) for device in devices], [("ENV-001", 2), ("CNT-001", 5)])
+        self.assertEqual(session.requests,[("GET", "/api/v1/edge-gateways/EDGE-001/iot-devices")])
 
-    def test_an_environment_the_cloud_refuses_stops_the_registry(self):
-        session = FakeCloudSession(FakeResponse(200, [equipment()]))
-        session.answers = {"/api/v1/laboratories/7/environments/9/equipments?iot=true": FakeResponse(403)}
+        self.assertEqual([(d.device_id, d.environment_id) for d in devices],[("ENV-001", 2), ("CNT-001", 2)])
 
-        with self.assertRaises(CloudRejectedError):
-            CloudDeviceRegistryGateway(session, (2, 9)).fetch_devices()
+    def test_gateway_refusal_stops_the_registry(self):
+        session = FakeCloudSession(FakeResponse(403))
+
+        with self.assertRaises(CloudRejectedError) as raised:
+            CloudDeviceRegistryGateway(session).fetch_devices()
+
+        self.assertEqual(raised.exception.status_code, 403)
 
     def test_reports_an_unexpected_answer(self):
         with self.assertRaises(CloudRejectedError):
@@ -206,7 +207,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
             service.synchronize_registry()
         self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001"])
 
-    def test_keeps_only_the_nodes_registered_in_this_edge(self):
+    def test_keeps_all_cloud_authorized_nodes_even_before_local_enrollment(self):
         service = DeviceRegistryApplicationService(
             FakeRegistryGateway([
                 monitored("ENV-001"),
@@ -219,10 +220,16 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
 
         registry = service.synchronize_registry()
 
-        self.assertEqual([d.device_id for d in registry.devices], ["ENV-001", "CNT-001"])
+        self.assertEqual(
+            [d.device_id for d in registry.devices],
+            ["ENV-001", "CNT-001", "CNT-OTHER"],
+        )
+
         self.assertEqual(registry.not_in_cloud, ["CNT-TYPO"])
-        self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001", "ENV-001"])
-        self.assertIsNone(service.find_monitored_device("CNT-OTHER"))
+
+        self.assertEqual([d.device_id for d in service.monitored_devices()],["CNT-001", "CNT-OTHER", "ENV-001"])
+
+        self.assertIsNotNone(service.find_monitored_device("CNT-OTHER"))
 
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
