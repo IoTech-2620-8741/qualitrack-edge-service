@@ -22,11 +22,11 @@ The QualiTrack nodes are:
     rotate their key, revoke them and list them
   - API keys stored as salted PBKDF2 verifiers
   - optional registration of a development test node
-  - connection with the QualiTrack Cloud REST API with the account of an
-    operator, signing in again when the token expires
-  - local copy of the cloud registry of the nodes registered in this Edge
-    (environment and cloud identifiers of each node), refreshed by a background
-    thread and by `flask cloud sync`; nodes of other stations are left out
+  - connection with the QualiTrack Cloud REST API as an Edge Gateway, with
+    its identifier and its API key in the `X-API-Key` header
+  - local copy of the cloud registry of the nodes the cloud assigns to this
+    Edge Gateway (environment and cloud identifiers of each node), refreshed
+    by a background thread and by `flask cloud sync`
   - reception of the air quality and motion of the environmental device
     (TS55), of the temperature, humidity, luminosity and RFID tags of the
     container monitor (TS56), and of the actions of the container monitor
@@ -190,10 +190,9 @@ settings and does not supply defaults for missing ones.
 | `PORT` | Port the service listens on |
 | `CLOUD_SYNC_ENABLED` | Connects the Edge with the QualiTrack Cloud REST API |
 | `CLOUD_API_URL` | Base URL of the cloud, without `/api/v1`; it must use `https` in production |
-| `CLOUD_USERNAME` | E-mail of the operator account the Edge signs in with |
-| `CLOUD_PASSWORD` | Password of that account; keep it out of version control |
+| `CLOUD_DEVICE_ID` | Identifier of this Edge Gateway in the cloud (its `sensorExternalId`) |
+| `CLOUD_API_KEY` | API key the cloud issued for this Edge Gateway; keep it out of version control |
 | `CLOUD_SYNC_INTERVAL_SECONDS` | Seconds between two synchronizations of the background thread |
-| `CLOUD_ENVIRONMENT_IDS` | Optional. Cloud environments this station serves, such as `3` or `3,5`; the Edge reads only their IoT devices. Empty reads the equipment of the whole laboratory (ADR-0013) |
 | `SYNCED_RETENTION_DAYS` | Optional, 7 by default. Days the Edge keeps a reading or action after the cloud accepted it; then it deletes it |
 | `REJECTED_RETENTION_DAYS` | Optional, 90 by default. Days the Edge keeps a reading or action the cloud refused for good; then it deletes it |
 
@@ -208,10 +207,11 @@ there are.
 
 ### 4. Connect the Edge with the cloud
 
-The Edge signs in to the cloud with the account of an operator of the
-laboratory. Create that account in QualiTrack and sign in once to change its
-first password; the laboratory also needs an active subscription. Then set the
-`CLOUD_*` settings and check the connection:
+The Edge authenticates in the cloud as an Edge Gateway (ADR-0014). In
+QualiTrack, register the Edge Gateway, place it in the environment it serves
+and generate its API key, which the cloud shows only once. Then set
+`CLOUD_DEVICE_ID` (the identifier of the Gateway) and `CLOUD_API_KEY` with the
+other `CLOUD_*` settings and check the connection:
 
 ```sh
 flask --app app cloud sync
@@ -222,33 +222,31 @@ flask --app app cloud profiles
 `cloud sync` runs now what the background thread runs every
 `CLOUD_SYNC_INTERVAL_SECONDS` while the service is up:
 
-1. It reads the environmental devices and container monitors of the
-   laboratory, the equipment that has a `sensorExternalId` in the cloud, and
-   keeps only the nodes registered in this Edge with `flask devices register`.
-   The laboratory may have nodes in environments other stations serve; the
-   Edge neither keeps them nor reads their profiles. `cloud devices` lists this
-   local copy with the environment and cloud identifier of each node, and
-   `cloud sync` names the nodes registered in this Edge that the cloud does not
-   have, for example because of a different `sensorExternalId`. With
-   `CLOUD_ENVIRONMENT_IDS` set, it reads only the IoT devices of those
-   environments instead of the equipment of the whole laboratory.
+1. It reads the IoT devices the cloud assigns to this Edge Gateway
+   (`/edge-gateways/{deviceId}/iot-devices`): environmental devices and
+   container monitors of the environment of the Gateway, 15 at most. When the
+   environment has more devices, the cloud distributes them among its
+   Gateways, so the Edge neither chooses nor filters environments. `cloud
+   devices` lists this local copy with the environment and cloud identifier of
+   each node, and `cloud sync` names the nodes registered in this Edge that the
+   cloud does not assign to it, for example because of a different
+   `sensorExternalId`.
 2. It copies the environmental profile of every node placed in an
-   environment (`/laboratories/{id}/environments/{id}/devices/{id}/environmental-profile`):
+   environment (`/edge-gateways/{deviceId}/iot-devices/{id}/environmental-profile`):
    the profile of the environment for the environmental device, and the
    profile of the container monitor for a container monitor. A node without a
    profile in the cloud has none in the Edge. The copy changes only when every
    profile was read, so the nodes keep the last one while the cloud is
    unreachable. `cloud profiles` lists it.
 3. It sends the pending readings and actions, oldest first, to the cloud route
-   of their node (`/laboratories/{id}/environments/{id}/telemetry-measurements`
-   for the environmental device, and `.../container-monitors/{id}/telemetry-measurements`
-   and `.../actuation-events` for a container monitor).
+   of their node (`/edge-gateways/{deviceId}/iot-devices/{id}/telemetry-measurements`,
+   and `.../actuation-events` for the actions of a container monitor).
    - `201` or `200` (the cloud already had it): the record becomes `SYNCED`.
    - `400`, `404`, `409` or `422`: the cloud refuses it for good, so it becomes
      `REJECTED` and the reason is logged.
    - A node the registry does not place in an environment yet: its records
      stay `PENDING` until it is.
-   - Cloud not reachable, a server error or a rejected operator account: the
+   - Cloud not reachable, a server error or a rejected API key: the
      synchronization stops, the records keep their state and the next cycle
      retries them.
 4. It deletes the records that became `SYNCED` more than
@@ -308,7 +306,7 @@ cp .env.example .env.production
 ```
 
 In `.env.production`, set `TEST_DEVICE_ID` (required by the settings even
-without the test node) and the `CLOUD_*` settings of the operator account, with
+without the test node) and the `CLOUD_*` settings of the Edge Gateway, with
 an `https` URL. `docker-compose.yml` fixes the production values: `APP_ENV`,
 `DEBUG=false`, `SEED_TEST_DEVICE=false`, `DATABASE_PATH=/data/edge.db`, `HOST`
 and `PORT`. Keep `.env.production` out of version control.

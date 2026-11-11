@@ -156,7 +156,7 @@ operations is exposed over HTTP.
 
 ## ADR-0005: Connect to the cloud with the account of an operator
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0014
 - **Date**: 2026-11-03
 
 ### Context
@@ -344,7 +344,8 @@ and rotates its logs. CI runs the compose file and builds the image for
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended by**: ADR-0013, which can read only the environments of the station
+- **Amended by**: ADR-0014: the cloud now sends only the devices of this Edge
+  Gateway and the Edge caches all of them, also before they are enrolled
 
 ### Context
 
@@ -429,7 +430,7 @@ a moment only. It is active by default.
 
 ## ADR-0013: Read the devices of the environments the station serves
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0014
 - **Date**: 2026-11-08
 - **Amends**: ADR-0011
 
@@ -467,3 +468,52 @@ laboratory), the registry of that cycle stops and the local copy is kept.
 - Filtering the laboratory list by environment in the Edge, which still
   downloads the equipment of the whole laboratory.
 
+## ADR-0014: Authenticate as an Edge Gateway and read its devices from the cloud
+
+- **Status**: Accepted
+- **Date**: 2026-11-10
+- **Supersedes**: ADR-0005 and ADR-0013
+- **Amends**: ADR-0011
+
+### Context
+
+The Edge signed in with the account of an operator (ADR-0005) and listed in
+`CLOUD_ENVIRONMENT_IDS` the environments it served (ADR-0013). The station kept
+the password of a person, and the environments had to be looked up and typed
+by hand. The cloud now registers each Edge Gateway as equipment of the
+laboratory, places it in an environment and issues an API key for it. In the
+review of the Edge, the course also set a limit of 15 IoT devices per Edge,
+with several Edges in one environment when it has more devices.
+
+### Decision
+
+The Edge authenticates with `CLOUD_DEVICE_ID`, the identifier of its Gateway
+in the cloud, and `CLOUD_API_KEY`, sent in the `X-API-Key` header of every
+request. It reads its devices from
+`GET /api/v1/edge-gateways/{deviceId}/iot-devices`. The cloud decides which
+devices that is: the IoT devices of the environment of the Gateway,
+distributed by identifier among the Gateways of that environment, 15 for each
+one. The Edge caches every device the cloud sends, also the ones not yet
+registered in its IAM, so a node can enroll with `POST /api/v1/devices/enroll`
+(development only) when the cached registry has it with the same type, in an
+environment and operational. `CLOUD_ENVIRONMENT_IDS`, `CLOUD_USERNAME` and
+`CLOUD_PASSWORD` are no longer read.
+
+### Consequences
+
+- The station keeps no password of a person, and the environment comes from
+  the cloud instead of a setting.
+- The limit of 15 devices and the distribution live in the cloud only; the
+  Edge does not need a change when the rule changes.
+- The API key is shown once in the cloud. A lost key needs a new one, and the
+  Gateway must be placed in an environment and operational to receive it.
+- When a device leaves the environment, the devices after it may move to
+  another Gateway of the environment and must enroll again in that Edge.
+- A `CLOUD_ENVIRONMENT_IDS` line left in the settings of a station is ignored.
+
+### Alternatives considered
+
+- Keeping `CLOUD_ENVIRONMENT_IDS` as an optional filter, which duplicates what
+  the API key already tells the cloud and can contradict it.
+- Linking each device to a Gateway by hand in the cloud, which adds a step
+  for the user that the cloud can work out.
