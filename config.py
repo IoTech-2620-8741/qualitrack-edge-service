@@ -142,7 +142,8 @@ def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
         raise ValueError(
             "CLOUD_API_URL must be an http or https URL"
         )
-
+    if environment_name == "production" and not url.startswith("https://"):
+        raise ValueError("CLOUD_API_URL must use https in production")
     device_id = _required(values, "CLOUD_DEVICE_ID").strip()
     api_key = _required(values, "CLOUD_API_KEY").strip()
 
