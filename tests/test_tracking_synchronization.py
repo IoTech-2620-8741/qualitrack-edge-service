@@ -84,6 +84,7 @@ class FakeCloudSession:
         self.status_code = status_code
         self.body = body
         self.requests = []
+        self.device_id = "EDGE-001"
 
     def request(self, method, path, json=None):
         self.requests.append((method, path, json))
@@ -101,9 +102,15 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         self.assertEqual(answer, SyncStatus.SYNCED)
         self.assertEqual(session.requests, [(
             "POST",
-            "/api/v1/laboratories/7/environments/2/telemetry-measurements",
-            {"metric": "AIR_QUALITY", "value": 412.5, "textValue": None,
-             "measuredAt": "2026-11-03T15:00:00Z", "profileVersion": 3},
+            "/api/v1/edge-gateways/EDGE-001/"
+            "iot-devices/15/telemetry-measurements",
+            {
+                "metric": "AIR_QUALITY",
+                "value": 412.5,
+                "textValue": None,
+                "measuredAt": "2026-11-03T15:00:00Z",
+                "profileVersion": 3,
+            },
         )])
 
     def test_sends_container_readings_and_actions_to_the_container_monitor_route(self):
@@ -119,9 +126,9 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         self.assertEqual((reading_answer, event_answer), (SyncStatus.SYNCED, SyncStatus.SYNCED))
         reading_request, event_request = session.requests
         self.assertEqual(reading_request[1],
-                         "/api/v1/laboratories/7/environments/3/container-monitors/16/telemetry-measurements")
+                         "/api/v1/edge-gateways/EDGE-001/iot-devices/16/telemetry-measurements")
         self.assertEqual((reading_request[2]["value"], reading_request[2]["textValue"]), (None, "E200-3412-0001"))
-        self.assertEqual(event_request[1], "/api/v1/laboratories/7/environments/3/container-monitors/16/actuation-events")
+        self.assertEqual(event_request[1], "/api/v1/edge-gateways/EDGE-001/iot-devices/16/actuation-events")
         self.assertEqual(event_request[2], {
             "action": "VENTILATION_ON", "triggerMetric": "TEMPERATURE", "triggerState": "WARNING",
             "result": "EXECUTED", "occurredAt": "2026-11-03T15:00:00Z", "profileVersion": 3,

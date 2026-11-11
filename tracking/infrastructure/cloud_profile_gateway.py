@@ -11,7 +11,7 @@ from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
 from tracking.domain.entities import EnvironmentalProfile, MonitoredDevice
 from tracking.domain.enums import ActuationAction, EnvironmentalState, Metric
 from tracking.domain.value_objects import ActuationRule, ProfileVersion, Threshold
-
+from urllib.parse import quote
 
 class CloudProfileGateway:
     """Read the profile of the environment or the container monitor of a node."""
@@ -26,10 +26,13 @@ class CloudProfileGateway:
             CloudRejectedError: The cloud answered with an unexpected code or a
                 profile the Edge cannot read; the previous copy is kept.
         """
-        path = (
-            f"/api/v1/laboratories/{device.laboratory_id}/environments/{device.environment_id}"
-            f"/devices/{device.cloud_device_id}/environmental-profile"
+        gateway_id = quote(
+            self._cloud_session.device_id,
+            safe="",
         )
+
+        path = f"/api/v1/edge-gateways/{gateway_id}"f"/iot-devices/{device.cloud_device_id}""/environmental-profile"
+
         response = self._cloud_session.request("GET", path)
         if response.status_code == 404:
             return None

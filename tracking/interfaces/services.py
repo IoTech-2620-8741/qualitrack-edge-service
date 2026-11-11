@@ -18,7 +18,9 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 
 from tracking.application.errors import (
     ConfigurationNotAvailable,
+    DeviceAlreadyEnrolled,
     DeviceAuthenticationFailed,
+    DeviceEnrollmentNotAllowed,
     DeviceTypeNotAllowed,
 )
 from tracking.domain.enums import (
@@ -83,6 +85,26 @@ class ActuationEventRequest(_TelemetryRequest):
     trigger_state: EnvironmentalState | None = Field(None, description="State that caused the action.")
     result: ActuationResult = ActuationResult.EXECUTED
     occurred_at: AwareDatetime = Field(..., description="ISO 8601 time of the action with offset.")
+
+class EnrollDeviceRequest(BaseModel):
+    """Initial enrollment request submitted by an ESP32."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    device_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="External identifier registered in the cloud.",
+    )
+
+    device_type: DeviceType = Field(
+        ...,
+        description="IoT device type registered in the cloud.",
+    )
 
 
 def _iso(value) -> str:
@@ -160,6 +182,77 @@ def _record_readings(request_model, device_type: DeviceType):
         "readings": [_reading_resource(reading) for reading in result.readings],
     }), 201 if result.created else 200
 
+
+@tracking_api.route("/api/v1/devices/enroll", methods=["POST"])
+def enroll_device():
+    """Enroll an IoT device using the cached cloud registry.
+
+    Development-only bootstrap flow.
+
+    The ESP32 provides its device identifier and type.
+    Tracking verifies that the device is authorized by the
+    cached cloud registry, then asks IAM to generate its API key.
+
+    Responses:
+        201: Device enrolled and API key issued.
+        400: Invalid registration request.
+        403: Enrollment disabled or device not authorized.
+        409: Device already registered in local IAM.
+        415: Unsupported request content type.
+    """
+    # Enrollment based on public identifiers must not be
+    # exposed as an unrestricted production endpoint.
+    if current_app.config["APP_ENV"] != "development":
+        return jsonify({
+            "error": "Unverified device enrollment is disabled"
+        }), 403
+
+    if not request.is_json:
+        return jsonify({
+            "error": "Content-Type must be application/json"
+        }), 415
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({
+            "error": "Invalid JSON request body"
+        }), 400
+
+    try:
+        enrollment = EnrollDeviceRequest.model_validate(payload)
+    except ValidationError:
+        return jsonify({
+            "error": "Invalid device enrollment request"
+        }), 400
+
+    try:
+        api_key = current_app.extensions[
+            "device_registry_service"
+        ].enroll_device(
+            enrollment.device_id,
+            enrollment.device_type,
+        )
+
+    except DeviceEnrollmentNotAllowed:
+        return jsonify({
+            "error": "Device is not authorized for enrollment"
+        }), 403
+
+    except DeviceAlreadyEnrolled:
+        return jsonify({
+            "error": "Device is already registered"
+        }), 409
+
+    response = jsonify({
+        "device_id": enrollment.device_id,
+        "device_type": enrollment.device_type.value,
+        "api_key": api_key,
+    })
+
+    response.headers["Cache-Control"] = "no-store"
+
+    return response, 201
 
 @tracking_api.route("/api/v1/monitoring/environment-readings", methods=["POST"])
 def create_environment_readings():

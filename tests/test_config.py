@@ -141,23 +141,30 @@ class LoadConfigTestCase(unittest.TestCase):
     def test_loads_the_cloud_connection_when_the_synchronization_is_enabled(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+
             write_environment_file(
                 root,
                 "development",
                 CLOUD_SYNC_ENABLED="true",
                 CLOUD_API_URL="http://localhost:8080/",
-                CLOUD_USERNAME="edge.operator@lab.pe",
+                CLOUD_DEVICE_ID="EDGE-001",
                 CLOUD_SYNC_INTERVAL_SECONDS="60",
             )
+
             with patch.dict(
-                os.environ, {"APP_ENV": "development", "CLOUD_PASSWORD": "local-secret"}, clear=True
+                    os.environ,
+                    {
+                        "APP_ENV": "development",
+                        "CLOUD_API_KEY": "gateway-secret",
+                    },
+                    clear=True,
             ):
                 config = load_config(root)
 
         self.assertTrue(config["CLOUD_SYNC_ENABLED"])
         self.assertEqual(config["CLOUD_API_URL"], "http://localhost:8080")
-        self.assertEqual(config["CLOUD_USERNAME"], "edge.operator@lab.pe")
-        self.assertEqual(config["CLOUD_PASSWORD"], "local-secret")
+        self.assertEqual(config["CLOUD_DEVICE_ID"], "EDGE-001")
+        self.assertEqual(config["CLOUD_API_KEY"], "gateway-secret")
         self.assertEqual(config["CLOUD_SYNC_INTERVAL_SECONDS"], 60)
         self.assertEqual(config["CLOUD_ENVIRONMENT_IDS"], ())
 
@@ -169,12 +176,12 @@ class LoadConfigTestCase(unittest.TestCase):
                 "development",
                 CLOUD_SYNC_ENABLED="true",
                 CLOUD_API_URL="http://localhost:8080",
-                CLOUD_USERNAME="edge.operator@lab.pe",
+                CLOUD_DEVICE_ID="EDGE-001",
                 CLOUD_SYNC_INTERVAL_SECONDS="60",
                 CLOUD_ENVIRONMENT_IDS=" 3, 5,3 ",
             )
             with patch.dict(
-                os.environ, {"APP_ENV": "development", "CLOUD_PASSWORD": "local-secret"}, clear=True
+                os.environ, {"APP_ENV": "development", "CLOUD_API_KEY": "gateway-secret"}, clear=True
             ):
                 config = load_config(root)
 
@@ -189,8 +196,8 @@ class LoadConfigTestCase(unittest.TestCase):
                     "development",
                     CLOUD_SYNC_ENABLED="true",
                     CLOUD_API_URL="http://localhost:8080",
-                    CLOUD_USERNAME="edge.operator@lab.pe",
-                    CLOUD_PASSWORD="local-secret",
+                    CLOUD_DEVICE_ID="EDGE-001",
+                    CLOUD_API_KEY="gateway-secret",
                     CLOUD_SYNC_INTERVAL_SECONDS="60",
                     CLOUD_ENVIRONMENT_IDS=setting,
                 )
@@ -202,16 +209,16 @@ class LoadConfigTestCase(unittest.TestCase):
         enabled = {
             "CLOUD_SYNC_ENABLED": "true",
             "CLOUD_API_URL": "https://cloud.example",
-            "CLOUD_USERNAME": "edge.operator@lab.pe",
-            "CLOUD_PASSWORD": "local-secret",
+            "CLOUD_DEVICE_ID": "EDGE-001",
+            "CLOUD_API_KEY": "gateway-secret",
             "CLOUD_SYNC_INTERVAL_SECONDS": "60",
         }
         for environment, overrides, message in (
-            ("development", {"CLOUD_PASSWORD": ""}, "CLOUD_USERNAME and CLOUD_PASSWORD"),
-            ("development", {"CLOUD_API_URL": "cloud.example"}, "http or https"),
-            ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "0"}, "at least 1"),
-            ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "often"}, "must be an integer"),
-            ("production", {"CLOUD_API_URL": "http://cloud.example"}, "https in production"),
+                ("development", {"CLOUD_API_KEY": ""}, "CLOUD_API_KEY cannot be empty"),
+                ("development", {"CLOUD_DEVICE_ID": ""}, "CLOUD_DEVICE_ID cannot be empty"),
+                ("development", {"CLOUD_API_URL": "cloud.example"}, "http or https"),
+                ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "0"}, "at least 1"),
+                ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "often"}, "must be an integer"),
         ):
             with self.subTest(overrides=overrides), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)

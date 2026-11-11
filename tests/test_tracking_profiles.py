@@ -74,10 +74,12 @@ class FakeResponse:
         return self._body
 
 
+
 class FakeCloudSession:
     def __init__(self, response):
         self.response = response
         self.paths = []
+        self.device_id = "EDGE-001"
 
     def request(self, method, path, json=None):
         self.paths.append((method, path))
@@ -102,7 +104,7 @@ class CloudProfileGatewayTestCase(unittest.TestCase):
         read = CloudProfileGateway(session).fetch_profile(placed("CNT-001"))
 
         self.assertEqual(session.paths,
-                         [("GET", "/api/v1/laboratories/7/environments/2/devices/16/environmental-profile")])
+                         [("GET", "/api/v1/edge-gateways/EDGE-001/iot-devices/16/environmental-profile")])
         self.assertEqual((read.device_id, read.version), ("CNT-001", ProfileVersion(3)))
         self.assertEqual(read.thresholds, (TEMPERATURE,))
         self.assertEqual(read.actuation_rules, (VENTILATION,))
