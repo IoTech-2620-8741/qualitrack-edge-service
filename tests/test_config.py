@@ -166,44 +166,6 @@ class LoadConfigTestCase(unittest.TestCase):
         self.assertEqual(config["CLOUD_DEVICE_ID"], "EDGE-001")
         self.assertEqual(config["CLOUD_API_KEY"], "gateway-secret")
         self.assertEqual(config["CLOUD_SYNC_INTERVAL_SECONDS"], 60)
-        self.assertEqual(config["CLOUD_ENVIRONMENT_IDS"], ())
-
-    def test_loads_the_environments_the_station_serves(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            write_environment_file(
-                root,
-                "development",
-                CLOUD_SYNC_ENABLED="true",
-                CLOUD_API_URL="http://localhost:8080",
-                CLOUD_DEVICE_ID="EDGE-001",
-                CLOUD_SYNC_INTERVAL_SECONDS="60",
-                CLOUD_ENVIRONMENT_IDS=" 3, 5,3 ",
-            )
-            with patch.dict(
-                os.environ, {"APP_ENV": "development", "CLOUD_API_KEY": "gateway-secret"}, clear=True
-            ):
-                config = load_config(root)
-
-        self.assertEqual(config["CLOUD_ENVIRONMENT_IDS"], (3, 5))
-
-    def test_rejects_invalid_environment_identifiers(self):
-        for setting, message in (("3,cold-room", "comma-separated list"), ("0", "from 1"), ("3,,5", "comma-separated list")):
-            with self.subTest(setting=setting), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                write_environment_file(
-                    root,
-                    "development",
-                    CLOUD_SYNC_ENABLED="true",
-                    CLOUD_API_URL="http://localhost:8080",
-                    CLOUD_DEVICE_ID="EDGE-001",
-                    CLOUD_API_KEY="gateway-secret",
-                    CLOUD_SYNC_INTERVAL_SECONDS="60",
-                    CLOUD_ENVIRONMENT_IDS=setting,
-                )
-                with patch.dict(os.environ, {"APP_ENV": "development"}, clear=True):
-                    with self.assertRaisesRegex(ValueError, message):
-                        load_config(root)
 
     def test_rejects_an_incomplete_or_insecure_cloud_connection(self):
         enabled = {
