@@ -285,7 +285,6 @@ package "Tracking Bounded Context" #DEEAFF {
     class "EnvironmentalProfileRepository\n(implementation)" as EnvironmentalProfileRepositoryImpl
 
     class CloudDeviceRegistryGateway {
-      -environment_ids: tuple[int, ...]
       +fetch_devices(): list[MonitoredDevice]
     }
 

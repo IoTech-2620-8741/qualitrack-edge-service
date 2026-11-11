@@ -13,7 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Settings `SYNCED_RETENTION_DAYS` and `REJECTED_RETENTION_DAYS`, both optional integers from 1 (ADR-0012).
 
-- Tracking (tracking): with the optional setting `CLOUD_ENVIRONMENT_IDS` (for example `3,5`), the device registry asks the cloud for the IoT devices of those environments only (`/environments/{environmentId}/equipments?iot=true`) instead of the equipment of the whole laboratory. Empty keeps the laboratory list, and the Edge still keeps only the nodes registered in it (ADR-0013).
+- The Edge authenticates in the cloud as an Edge Gateway, with the settings `CLOUD_DEVICE_ID` and `CLOUD_API_KEY` sent in the `X-API-Key` header, and reads the IoT devices the cloud assigns to it from `/edge-gateways/{deviceId}/iot-devices` (#20, ADR-0014).
+
+- Tracking (tracking): `POST /api/v1/devices/enroll` lets a node the cloud assigns to this Edge obtain its local API key. Development only (#20).
+
+### Changed
+
+- Tracking (tracking): the device registry caches every device the cloud sends for this Edge Gateway, also the ones not yet registered in the Edge (#20).
+
+### Removed
+
+- Settings `CLOUD_USERNAME` and `CLOUD_PASSWORD`: the Edge no longer signs in with the account of an operator (#20, ADR-0014 supersedes ADR-0005).
+
+- Setting `CLOUD_ENVIRONMENT_IDS`, added in #19 and never released: the cloud tells each Edge Gateway its devices, 15 at most, so the Edge no longer lists environments (ADR-0014 supersedes ADR-0013).
 
 ## [0.2.0] - 2026-11-03
 
