@@ -58,22 +58,34 @@ Identifies the ESP32 nodes and validates their credentials.
 ### Tracking
 
 Receives the telemetry and actions of the nodes, keeps them until the cloud
-accepts them, and synchronizes the Edge with the cloud. It is the Edge
+accepts them, and hands each node the configuration it applies. It is the Edge
 counterpart of the Tracking & Telemetry bounded context of the cloud platform.
 
 - **Core concepts**: `TelemetryReading` (one metric a node measured at a
   moment) and `ActuationEvent` (an action of a container monitor), each with
-  its synchronization status; `MonitoredDevice`, a node the cloud registers for
-  the laboratory, with the cloud identifiers its telemetry is synchronized to;
-  `EnvironmentalProfile`, the thresholds and actuation rules a node applies,
-  with the version of the cloud.
+  its synchronization status; `EnvironmentalProfile`, the thresholds and
+  actuation rules a node applies, with the version of the cloud.
 - **Anti-corruption layer**: `IamAntiCorruptionLayer` translates IAM's
   authentication into Tracking's own `ReportingDevice`, so Tracking does not
   depend on IAM's model.
+
+### Sync
+
+Exchanges data with the cloud: it reads the device registry and the profiles
+and sends the readings and actions Tracking keeps pending. It uses the model
+of Tracking directly, and Tracking does not depend on it (ADR-0015).
+
+- **Core concept**: `MonitoredDevice`, a node of this Edge as the cloud
+  registers it, with the cloud identifiers its telemetry is synchronized to.
+- **Anti-corruption layer**: its own `IamAntiCorruptionLayer` reports the nodes
+  registered in this Edge.
 - **Cloud gateways**: `CloudDeviceRegistryGateway` reads the equipment of the
   laboratory, `CloudProfileGateway` the profile of each node and
   `CloudTelemetryGateway` sends the pending readings and actions. Each one
-  translates the resources of the cloud into Tracking concepts.
+  translates the resources of the cloud into Edge concepts.
+- **Commands**: `flask cloud sync`, `pending`, `devices` and `profiles`.
+- **Enrollment**: `POST /api/v1/devices/enroll` gives a node the cached cloud
+  registry authorizes its local API key (development only).
 
 ### Shared
 
@@ -114,6 +126,12 @@ qualitrack-edge-service/
 │   ├── integration/
 │   ├── infrastructure/
 │   └── interfaces/
+├── sync/
+│   ├── domain/
+│   ├── application/
+│   ├── integration/
+│   ├── infrastructure/
+│   └── interfaces/
 ├── shared/
 │   └── infrastructure/
 ├── docs/                # technical stories, class diagram, ADRs
@@ -137,8 +155,9 @@ node-to-Edge and Edge-to-cloud interactions.
 ### Story-to-Context Mapping
 
 - **IAM bounded context**: `TS53`, `TS54`, and the authentication of `TS55`–`TS59`
-- **Tracking bounded context**: `TS55`, `TS56`, `TS57`, `TS58`, `TS59`, `TS60`,
-  `TS61`, `TS62`, `TS63`, `TS64`
+- **Tracking bounded context**: `TS55`, `TS56`, `TS57`, `TS58`, `TS59`, `TS60`
+- **Sync bounded context**: `TS61`, `TS62`, `TS63`, `TS64`, and the
+  `flask cloud pending` command of `TS60`
 - **Shared infrastructure**: the cloud session and the background
   synchronization of `TS61`–`TS64`
 
