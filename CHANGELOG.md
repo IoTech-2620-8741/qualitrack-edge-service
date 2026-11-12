@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tracking (tracking): with the optional setting `CLOUD_ENVIRONMENT_IDS` (for example `3,5`), the device registry asks the cloud for the IoT devices of those environments only (`/environments/{environmentId}/equipments?iot=true`) instead of the equipment of the whole laboratory. Empty keeps the laboratory list, and the Edge still keeps only the nodes registered in it (ADR-0013).
 
+### Changed
+
+- Sync (sync): new bounded context that owns the exchange with the cloud: the device registry, the copy of the profiles, the sending of the pending readings and actions, their deletion and the `flask cloud` commands. Tracking keeps the reception of the telemetry and the configuration it hands to each node, and no longer depends on the cloud. The routes, the commands, the settings and the database do not change; the loggers of the cloud gateways are now named `sync.infrastructure.*` (ADR-0014).
+
 ## [0.2.0] - 2026-11-03
 
 ### Changed
