@@ -5,8 +5,7 @@ implementations into the services.
 """
 from typing import Protocol
 
-from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, MonitoredDevice, TelemetryReading
-from tracking.domain.enums import SyncStatus
+from tracking.domain.entities import EnvironmentalProfile, MonitoredDevice
 
 
 class DeviceRegistryGateway(Protocol):
@@ -22,22 +21,4 @@ class ProfileGateway(Protocol):
 
     def fetch_profile(self, device: MonitoredDevice) -> EnvironmentalProfile | None:
         """Read the profile of a node, or ``None`` when the cloud has none yet."""
-        ...
-
-
-class TelemetryGateway(Protocol):
-    """Destination of the readings and actions the Edge keeps pending.
-
-    Each method returns ``SYNCED`` when the cloud accepts the record (also when
-    it already had it) and ``REJECTED`` when it refuses it for good. It raises
-    ``CloudRequestError`` when the cloud cannot answer now, so the record stays
-    pending.
-    """
-
-    def send_reading(self, device: MonitoredDevice, reading: TelemetryReading) -> SyncStatus:
-        """Send one reading to the cloud route of its node."""
-        ...
-
-    def send_actuation_event(self, device: MonitoredDevice, event: ActuationEvent) -> SyncStatus:
-        """Send one action to the cloud route of its container monitor."""
         ...

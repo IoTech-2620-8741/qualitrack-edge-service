@@ -1,6 +1,6 @@
 """Cloud gateway that sends the pending readings and actions (TS61, TS62, TS63).
 
-It is the anti-corruption layer between Tracking and the Tracking & Telemetry
+It is the anti-corruption layer between Sync and the Tracking & Telemetry
 context of the cloud: it builds the nested routes of the QualiTrack Cloud REST
 API from the cloud identifiers of each node and translates the records into
 its request resources.

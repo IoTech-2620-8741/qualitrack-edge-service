@@ -6,14 +6,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app import create_app
 from shared.infrastructure.cloud_session import CloudSession
+from sync.application.services import TelemetrySynchronizationApplicationService
+from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from tracking.application.services import (
     DeviceRegistryApplicationService,
     EnvironmentalProfileApplicationService,
-    TelemetrySynchronizationApplicationService,
 )
 from tracking.infrastructure.cloud_profile_gateway import CloudProfileGateway
 from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
-from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
 from tracking.infrastructure.repositories import EnvironmentalProfileRepository, MonitoredDeviceRepository
