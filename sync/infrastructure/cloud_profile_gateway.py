@@ -1,6 +1,6 @@
 """Cloud gateway that reads the environmental profile of each node (TS64).
 
-It is the anti-corruption layer between Tracking and the Tracking & Telemetry
+It is the anti-corruption layer between Sync and the Tracking & Telemetry
 context of the cloud: it reads the profile a node applies and translates the
 resource of the QualiTrack Cloud REST API into an
 :class:`~tracking.domain.entities.EnvironmentalProfile`.
@@ -8,10 +8,11 @@ resource of the QualiTrack Cloud REST API into an
 from datetime import UTC, datetime
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
-from tracking.domain.entities import EnvironmentalProfile, MonitoredDevice
+from sync.domain.entities import MonitoredDevice
+from tracking.domain.entities import EnvironmentalProfile
 from tracking.domain.enums import ActuationAction, EnvironmentalState, Metric
 from tracking.domain.value_objects import ActuationRule, ProfileVersion, Threshold
-
+from urllib.parse import quote
 
 class CloudProfileGateway:
     """Read the profile of the environment or the container monitor of a node."""
@@ -26,10 +27,13 @@ class CloudProfileGateway:
             CloudRejectedError: The cloud answered with an unexpected code or a
                 profile the Edge cannot read; the previous copy is kept.
         """
-        path = (
-            f"/api/v1/laboratories/{device.laboratory_id}/environments/{device.environment_id}"
-            f"/devices/{device.cloud_device_id}/environmental-profile"
+        gateway_id = quote(
+            self._cloud_session.device_id,
+            safe="",
         )
+
+        path = f"/api/v1/edge-gateways/{gateway_id}"f"/iot-devices/{device.cloud_device_id}""/environmental-profile"
+
         response = self._cloud_session.request("GET", path)
         if response.status_code == 404:
             return None
@@ -39,6 +43,9 @@ class CloudProfileGateway:
                 response.status_code,
             )
         try:
+            resource = response.json()
+            if not isinstance(resource, dict):
+                raise ValueError("The profile must be a JSON object")
             return self._to_profile(device.device_id, response.json())
         except (KeyError, TypeError, ValueError) as error:
             raise CloudRejectedError(f"The cloud sent a profile of {device.device_id} the Edge cannot read: {error}") \

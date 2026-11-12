@@ -3,14 +3,17 @@ import unittest
 from datetime import UTC, datetime, timedelta, timezone
 
 from app import create_app
+from iam.infrastructure.models import Device as DeviceModel
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
-from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.application.services import DeviceRegistryApplicationService
-from tracking.domain.entities import MonitoredDevice
-from tracking.domain.enums import DeviceStatus, DeviceType
-from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
-from tracking.infrastructure.repositories import MonitoredDeviceRepository
+from sync.application.errors import CloudSynchronizationDisabled
+from sync.application.services import DeviceRegistryApplicationService
+from sync.domain.entities import MonitoredDevice
+from sync.domain.enums import DeviceStatus
+from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from sync.infrastructure.repositories import MonitoredDeviceRepository
+from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
+from tracking.domain.enums import DeviceType
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
 
@@ -30,17 +33,18 @@ class FakeResponse:
         return self._body
 
 
+
 class FakeCloudSession:
     def __init__(self, response):
         self.response = response
+        self.answers = {}
         self.requests = []
-
-    def laboratory_id(self):
-        return 7
+        self.device_id = "EDGE-001"
 
     def request(self, method, path, json=None):
         self.requests.append((method, path))
-        return self.response
+        return self.answers.get(path, self.response)
+
 
 
 def equipment(**overrides):
@@ -83,7 +87,7 @@ class MonitoredDeviceTestCase(unittest.TestCase):
 
 
 class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
-    def test_translates_the_iot_devices_of_the_laboratory(self):
+    def test_translates_the_iot_devices_of_the_gateway(self):
         session = FakeCloudSession(FakeResponse(200, [
             equipment(),
             equipment(id=16, environmentId=None, deviceType="CONTAINER_MONITOR",
@@ -93,12 +97,12 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
             equipment(id=19, sensorExternalId="ENV-009", status="RETIRED"),
         ]))
 
-        with self.assertLogs("tracking.infrastructure.cloud_registry_gateway", "WARNING") as logs:
+        with self.assertLogs("sync.infrastructure.cloud_registry_gateway", "WARNING") as logs:
             devices = CloudDeviceRegistryGateway(session).fetch_devices()
 
         self.assertIn("Skipped the cloud device ENV-009", logs.output[0])
 
-        self.assertEqual(session.requests, [("GET", "/api/v1/laboratories/7/equipments")])
+        self.assertEqual(session.requests, [("GET", "/api/v1/edge-gateways/EDGE-001/iot-devices")])
         self.assertEqual([device.device_id for device in devices], ["ENV-001", "CNT-001"])
         container = devices[1]
         self.assertEqual(container.device_type, DeviceType.CONTAINER_MONITOR)
@@ -106,9 +110,61 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
         self.assertIsNone(container.environment_id)
         self.assertEqual(container.status, DeviceStatus.MAINTENANCE)
 
+    def test_reads_the_iot_devices_assigned_to_the_gateway(self):
+        session = FakeCloudSession(FakeResponse(200, [
+            equipment(),
+            equipment(
+                id=16,
+                environmentId=2,
+                deviceType="CONTAINER_MONITOR",
+                sensorExternalId="CNT-001",
+            ),
+        ]))
+
+        devices = CloudDeviceRegistryGateway(session).fetch_devices()
+
+        self.assertEqual(session.requests,[("GET", "/api/v1/edge-gateways/EDGE-001/iot-devices")])
+
+        self.assertEqual([(d.device_id, d.environment_id) for d in devices],[("ENV-001", 2), ("CNT-001", 2)])
+
+    def test_gateway_refusal_stops_the_registry(self):
+        session = FakeCloudSession(FakeResponse(403))
+
+        with self.assertRaises(CloudRejectedError) as raised:
+            CloudDeviceRegistryGateway(session).fetch_devices()
+
+        self.assertEqual(raised.exception.status_code, 403)
+
     def test_reports_an_unexpected_answer(self):
         with self.assertRaises(CloudRejectedError):
             CloudDeviceRegistryGateway(FakeCloudSession(FakeResponse(404))).fetch_devices()
+
+    def test_rejects_malformed_equipment_lists(self):
+        """Reject unexpected equipment list structures."""
+        invalid_payloads = [{"equipments": []},[None],["invalid-device"]]
+
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                session = FakeCloudSession(FakeResponse(200, payload))
+
+                with self.assertRaises(CloudRejectedError):
+                    CloudDeviceRegistryGateway(session).fetch_devices()
+
+
+class IamAntiCorruptionLayerTestCase(unittest.TestCase):
+    def test_reports_the_nodes_registered_in_this_edge_revoked_ones_included(self):
+        class FakeIamDevice:
+            def __init__(self, device_id, revoked):
+                self.device_id = device_id
+                self.revoked_at = NOW if revoked else None
+
+        class FakeIamAuthenticationService:
+            def list_devices(self):
+                return [FakeIamDevice("ENV-001", False), FakeIamDevice("CNT-009", True)]
+
+        layer = IamAntiCorruptionLayer(FakeIamAuthenticationService())
+
+        self.assertEqual(layer.registered_device_ids(), {"ENV-001", "CNT-009"})
 
 
 class FakeRegistryGateway:
@@ -170,7 +226,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
             service.synchronize_registry()
         self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001"])
 
-    def test_keeps_only_the_nodes_registered_in_this_edge(self):
+    def test_keeps_all_cloud_authorized_nodes_even_before_local_enrollment(self):
         service = DeviceRegistryApplicationService(
             FakeRegistryGateway([
                 monitored("ENV-001"),
@@ -183,14 +239,47 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
 
         registry = service.synchronize_registry()
 
-        self.assertEqual([d.device_id for d in registry.devices], ["ENV-001", "CNT-001"])
+        self.assertEqual(
+            [d.device_id for d in registry.devices],
+            ["ENV-001", "CNT-001", "CNT-OTHER"],
+        )
+
         self.assertEqual(registry.not_in_cloud, ["CNT-TYPO"])
-        self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001", "ENV-001"])
-        self.assertIsNone(service.find_monitored_device("CNT-OTHER"))
+
+        self.assertEqual([d.device_id for d in service.monitored_devices()],["CNT-001", "CNT-OTHER", "ENV-001"])
+
+        self.assertIsNotNone(service.find_monitored_device("CNT-OTHER"))
 
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
             DeviceRegistryApplicationService(None, FakeLayer(), self.repository).synchronize_registry()
+
+
+    def test_malformed_cloud_registry_preserves_local_devices(self):
+        """Keep the previous registry when Cloud returns invalid data."""
+        self.repository.replace_all([
+            monitored("ENV-001"),
+        ])
+
+        session = FakeCloudSession(
+            FakeResponse(200, {"equipments": []})
+        )
+
+        service = DeviceRegistryApplicationService(
+            CloudDeviceRegistryGateway(session),
+            FakeLayer("ENV-001"),
+            self.repository,
+        )
+
+        with self.assertRaises(CloudRejectedError):
+            service.synchronize_registry()
+
+        stored_devices = service.monitored_devices()
+
+        self.assertEqual(
+            [device.device_id for device in stored_devices],
+            ["ENV-001"],
+        )
 
 
 class CloudSyncSchedulerTestCase(unittest.TestCase):
@@ -247,6 +336,24 @@ class CloudCliTestCase(unittest.TestCase):
             result.output.split(),
             ["CNT-001", "CONTAINER_MONITOR", "laboratory", "7", "environment", "-", "cloud", "id", "16", "OPERATIONAL"],
         )
+
+    def test_enrolls_a_node_of_the_cached_registry_once(self):
+        client = self.app.test_client()
+        body = {"device_id": "ENV-ENROLL", "device_type": "ENVIRONMENTAL_DEVICE"}
+        with self.app.app_context():
+            MonitoredDeviceRepository().replace_all([monitored("ENV-ENROLL")])
+        try:
+            enrolled = client.post("/api/v1/devices/enroll", json=body)
+            again = client.post("/api/v1/devices/enroll", json=body)
+            unknown = client.post("/api/v1/devices/enroll", json={**body, "device_id": "ENV-404"})
+        finally:
+            with self.app.app_context():
+                MonitoredDeviceRepository().replace_all([])
+                DeviceModel.delete().where(DeviceModel.device_id == "ENV-ENROLL").execute()
+
+        self.assertEqual(enrolled.status_code, 201, enrolled.json)
+        self.assertTrue(enrolled.json["api_key"])
+        self.assertEqual((again.status_code, unknown.status_code), (409, 403))
 
 
 if __name__ == "__main__":

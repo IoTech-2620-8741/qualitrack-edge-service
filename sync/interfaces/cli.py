@@ -1,4 +1,4 @@
-"""Command-line interface for the cloud synchronization of the Tracking context.
+"""Command-line interface for the cloud synchronization of the Sync context.
 
 ``cloud sync`` runs now what the background thread runs every interval: it
 reads the device registry, copies the profile of each node and sends the
@@ -16,7 +16,7 @@ from flask import current_app
 from flask.cli import AppGroup
 
 from shared.infrastructure.cloud_session import CloudRequestError
-from tracking.application.errors import CloudSynchronizationDisabled
+from sync.application.errors import CloudSynchronizationDisabled
 
 cloud_cli = AppGroup("cloud", help="Synchronize the Edge with the QualiTrack cloud.")
 
@@ -36,7 +36,7 @@ def synchronize() -> None:
                 "Registered in this Edge but not in the cloud (check their sensorExternalId): "
                 + ", ".join(registry.not_in_cloud)
             )
-        profiles = current_app.extensions["environmental_profile_service"].synchronize_profiles()
+        profiles = current_app.extensions["profile_synchronization_service"].synchronize_profiles()
         click.echo(f"Environmental profiles: {len(profiles)} profile(s) from the cloud")
         summaries = current_app.extensions["telemetry_synchronization_service"].synchronize_pending()
     except CloudSynchronizationDisabled as error:
@@ -54,7 +54,7 @@ def synchronize() -> None:
 @cloud_cli.command("pending")
 def show_pending() -> None:
     """Count the readings and actions stored by synchronization status (TS60)."""
-    counts = current_app.extensions["telemetry_service"].pending_counts()
+    counts = current_app.extensions["telemetry_synchronization_service"].pending_counts()
     for label, key in (("Readings", "readings"), ("Actuation events", "actuation_events")):
         by_status = ", ".join(f"{status.value} {total}" for status, total in counts[key].items())
         click.echo(f"{label}: {by_status}")

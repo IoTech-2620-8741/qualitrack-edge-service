@@ -131,17 +131,6 @@ package "Tracking Bounded Context" #DEEAFF {
       +synchronized(status): ActuationEvent
     }
 
-    class MonitoredDevice {
-      +device_id: str
-      +device_type: DeviceType
-      +laboratory_id: int
-      +environment_id: int | None
-      +cloud_device_id: int
-      +status: DeviceStatus
-      +synced_at: datetime
-      +is_in_environment: bool
-    }
-
     class EnvironmentalProfile {
       +device_id: str
       +version: ProfileVersion
@@ -209,12 +198,6 @@ package "Tracking Bounded Context" #DEEAFF {
       +count_by_sync_status(): dict[SyncStatus, int]
     }
 
-    interface "MonitoredDeviceRepository\n<<Protocol>>" as IMonitoredDeviceRepository {
-      +find_by_device_id(device_id): MonitoredDevice | None
-      +find_all(): list[MonitoredDevice]
-      +replace_all(devices)
-    }
-
     interface "EnvironmentalProfileRepository\n<<Protocol>>" as IEnvironmentalProfileRepository {
       +find_by_device_id(device_id): EnvironmentalProfile | None
       +find_all(): list[EnvironmentalProfile]
@@ -227,38 +210,12 @@ package "Tracking Bounded Context" #DEEAFF {
       +__init__(iam_anti_corruption_layer, telemetry_reading_repository=None, actuation_event_repository=None, clock=None)
       +record_readings(device_id, api_key, device_type, measured_at, profile_version, values): TelemetryReadingSaveResult
       +record_actuation_event(device_id, api_key, action, trigger_metric, trigger_state, result, occurred_at, profile_version): ActuationEventSaveResult
-      +pending_counts(): dict
-    }
-
-    class DeviceRegistryApplicationService {
-      +__init__(registry_gateway, iam_anti_corruption_layer, monitored_device_repository=None)
-      +synchronize_registry(): RegistrySynchronization
-      +monitored_devices(): list[MonitoredDevice]
     }
 
     class EnvironmentalProfileApplicationService {
-      +__init__(profile_gateway, iam_anti_corruption_layer, monitored_device_repository=None, environmental_profile_repository=None)
-      +synchronize_profiles(): list[EnvironmentalProfile]
+      +__init__(iam_anti_corruption_layer, environmental_profile_repository=None)
       +configuration_for(device_id, api_key): NodeConfiguration
       +profiles(): list[EnvironmentalProfile]
-    }
-
-    class TelemetrySynchronizationApplicationService {
-      +__init__(telemetry_gateway, monitored_device_repository=None, telemetry_reading_repository=None, actuation_event_repository=None, batch_size=100)
-      +synchronize_pending(): dict[str, SynchronizationSummary]
-    }
-
-    interface "DeviceRegistryGateway\n<<Protocol>>" as IDeviceRegistryGateway {
-      +fetch_devices(): list[MonitoredDevice]
-    }
-
-    interface "ProfileGateway\n<<Protocol>>" as IProfileGateway {
-      +fetch_profile(device): EnvironmentalProfile | None
-    }
-
-    interface "TelemetryGateway\n<<Protocol>>" as ITelemetryGateway {
-      +send_reading(device, reading): SyncStatus
-      +send_actuation_event(device, event): SyncStatus
     }
 
     class DeviceAuthenticationFailed
@@ -270,32 +227,16 @@ package "Tracking Bounded Context" #DEEAFF {
     class IamAntiCorruptionLayer {
       +__init__(iam_authentication_service)
       +authenticated_reporting_device(device_id, credential): ReportingDevice | None
-      +registered_device_ids(): set[str]
     }
   }
 
   package "infrastructure" as tracking_infrastructure #C9DFFF {
     class TelemetryReadingModel <<Peewee Model>>
     class ActuationEventModel <<Peewee Model>>
-    class MonitoredDeviceModel <<Peewee Model>>
     class EnvironmentalProfileModel <<Peewee Model>>
     class "TelemetryReadingRepository\n(implementation)" as TelemetryReadingRepositoryImpl
     class "ActuationEventRepository\n(implementation)" as ActuationEventRepositoryImpl
-    class "MonitoredDeviceRepository\n(implementation)" as MonitoredDeviceRepositoryImpl
     class "EnvironmentalProfileRepository\n(implementation)" as EnvironmentalProfileRepositoryImpl
-
-    class CloudDeviceRegistryGateway {
-      +fetch_devices(): list[MonitoredDevice]
-    }
-
-    class CloudProfileGateway {
-      +fetch_profile(device): EnvironmentalProfile | None
-    }
-
-    class CloudTelemetryGateway {
-      +send_reading(device, reading): SyncStatus
-      +send_actuation_event(device, event): SyncStatus
-    }
   }
 
   package "interfaces" as tracking_interfaces #BCCEFF {
@@ -333,6 +274,97 @@ package "Tracking Bounded Context" #DEEAFF {
       +POST /api/v1/control/actuation-events
       +GET /api/v1/configurations/{deviceId}
     }
+  }
+}
+
+package "Sync Bounded Context" #F0E6FF {
+  package "domain" as sync_domain #F6EEFF {
+    class MonitoredDevice {
+      +device_id: str
+      +device_type: DeviceType
+      +laboratory_id: int
+      +environment_id: int | None
+      +cloud_device_id: int
+      +status: DeviceStatus
+      +synced_at: datetime
+      +is_in_environment: bool
+    }
+
+    interface "MonitoredDeviceRepository\n<<Protocol>>" as IMonitoredDeviceRepository {
+      +find_by_device_id(device_id): MonitoredDevice | None
+      +find_all(): list[MonitoredDevice]
+      +replace_all(devices)
+    }
+  }
+
+  package "application" as sync_application #EADBFF {
+    class DeviceRegistryApplicationService {
+      +__init__(registry_gateway, iam_anti_corruption_layer, monitored_device_repository=None)
+      +synchronize_registry(): RegistrySynchronization
+      +monitored_devices(): list[MonitoredDevice]
+      +enroll_device(device_id, device_type): str
+    }
+
+    class ProfileSynchronizationApplicationService {
+      +__init__(profile_gateway, monitored_device_repository=None, environmental_profile_repository=None)
+      +synchronize_profiles(): list[EnvironmentalProfile]
+    }
+
+    class TelemetrySynchronizationApplicationService {
+      +__init__(telemetry_gateway, monitored_device_repository=None, telemetry_reading_repository=None, actuation_event_repository=None, batch_size=100)
+      +synchronize_pending(): dict[str, SynchronizationSummary]
+      +pending_counts(): dict
+      +purge(): int
+    }
+
+    interface "DeviceRegistryGateway\n<<Protocol>>" as IDeviceRegistryGateway {
+      +fetch_devices(): list[MonitoredDevice]
+    }
+
+    interface "ProfileGateway\n<<Protocol>>" as IProfileGateway {
+      +fetch_profile(device): EnvironmentalProfile | None
+    }
+
+    interface "TelemetryGateway\n<<Protocol>>" as ITelemetryGateway {
+      +send_reading(device, reading): SyncStatus
+      +send_actuation_event(device, event): SyncStatus
+    }
+
+    class CloudSynchronizationDisabled
+    class DeviceEnrollmentNotAllowed
+    class DeviceAlreadyEnrolled
+  }
+
+  package "integration" as sync_integration #E6DCF5 {
+    class "IamAntiCorruptionLayer" as SyncIamAntiCorruptionLayer {
+      +__init__(iam_authentication_service)
+      +registered_device_ids(): set[str]
+      +enroll_device(device_id, device_type): str
+    }
+  }
+
+  package "infrastructure" as sync_infrastructure #DDC9FF {
+    class MonitoredDeviceModel <<Peewee Model>>
+    class "MonitoredDeviceRepository\n(implementation)" as MonitoredDeviceRepositoryImpl
+
+    class CloudDeviceRegistryGateway {
+      +fetch_devices(): list[MonitoredDevice]
+    }
+
+    class CloudProfileGateway {
+      +fetch_profile(device): EnvironmentalProfile | None
+    }
+
+    class CloudTelemetryGateway {
+      +send_reading(device, reading): SyncStatus
+      +send_actuation_event(device, event): SyncStatus
+    }
+  }
+
+  package "interfaces" as sync_interfaces #CEBCFF {
+    class sync_api <<Flask Blueprint>> {
+      +POST /api/v1/devices/enroll
+    }
 
     class cloud_cli <<Flask command group>> {
       +sync()
@@ -347,8 +379,8 @@ package "Shared Infrastructure" #E8FFE8 {
   class db <<SqliteDatabase>>
 
   class CloudSession {
-    +__init__(base_url, username, password, http_client=None)
-    +laboratory_id(): int
+    +__init__(base_url, device_id, api_key, http_client=None)
+    +device_id: str
     +request(method, path, json=None): Response
   }
 
@@ -401,17 +433,29 @@ TelemetryApplicationService ..> ActuationEvent : creates through factory
 TelemetryApplicationService ..> DeviceAuthenticationFailed : raises
 TelemetryApplicationService ..> DeviceTypeNotAllowed : raises
 
-DeviceRegistryApplicationService --> IDeviceRegistryGateway
-DeviceRegistryApplicationService --> IamAntiCorruptionLayer : keeps only the nodes of this Edge
-DeviceRegistryApplicationService --> IMonitoredDeviceRepository
-EnvironmentalProfileApplicationService --> IProfileGateway
 EnvironmentalProfileApplicationService --> IamAntiCorruptionLayer
 EnvironmentalProfileApplicationService --> IEnvironmentalProfileRepository
 EnvironmentalProfileApplicationService ..> ConfigurationNotAvailable : raises
+
+SyncIamAntiCorruptionLayer --> AuthApplicationService : lists the nodes through
+DeviceRegistryApplicationService --> IDeviceRegistryGateway
+DeviceRegistryApplicationService --> SyncIamAntiCorruptionLayer : keeps only the nodes of this Edge
+DeviceRegistryApplicationService --> IMonitoredDeviceRepository
+ProfileSynchronizationApplicationService --> IProfileGateway
+ProfileSynchronizationApplicationService --> IMonitoredDeviceRepository : reads the placed nodes
+ProfileSynchronizationApplicationService --> IEnvironmentalProfileRepository : replaces the copy of Tracking
 TelemetrySynchronizationApplicationService --> ITelemetryGateway
 TelemetrySynchronizationApplicationService --> IMonitoredDeviceRepository : routes by node
-TelemetrySynchronizationApplicationService --> ITelemetryReadingRepository
-TelemetrySynchronizationApplicationService --> IActuationEventRepository
+TelemetrySynchronizationApplicationService --> ITelemetryReadingRepository : sends the pending of Tracking
+TelemetrySynchronizationApplicationService --> IActuationEventRepository : sends the pending of Tracking
+MonitoredDeviceRepositoryImpl ..|> IMonitoredDeviceRepository
+MonitoredDeviceRepositoryImpl --> MonitoredDeviceModel
+MonitoredDeviceModel --> db
+cloud_cli --> DeviceRegistryApplicationService : invokes
+sync_api --> DeviceRegistryApplicationService : enrolls through
+cloud_cli --> ProfileSynchronizationApplicationService : invokes
+cloud_cli --> EnvironmentalProfileApplicationService : lists the profiles
+cloud_cli --> TelemetrySynchronizationApplicationService : invokes
 
 TelemetryReadingRepositoryImpl ..|> ITelemetryReadingRepository
 TelemetryReadingRepositoryImpl --> TelemetryReadingModel
@@ -419,8 +463,6 @@ TelemetryReadingRepositoryImpl ..> TelemetryConflict : raises
 ActuationEventRepositoryImpl ..|> IActuationEventRepository
 ActuationEventRepositoryImpl --> ActuationEventModel
 ActuationEventRepositoryImpl ..> TelemetryConflict : raises
-MonitoredDeviceRepositoryImpl ..|> IMonitoredDeviceRepository
-MonitoredDeviceRepositoryImpl --> MonitoredDeviceModel
 EnvironmentalProfileRepositoryImpl ..|> IEnvironmentalProfileRepository
 EnvironmentalProfileRepositoryImpl --> EnvironmentalProfileModel
 
@@ -437,27 +479,26 @@ tracking_api --> ContainerReadingRequest : validates
 tracking_api --> ActuationEventRequest : validates
 tracking_api --> TelemetryApplicationService : invokes
 tracking_api --> EnvironmentalProfileApplicationService : invokes
-cloud_cli --> DeviceRegistryApplicationService : invokes
-cloud_cli --> EnvironmentalProfileApplicationService : invokes
-cloud_cli --> TelemetrySynchronizationApplicationService : invokes
 
 DeviceModel --> db
 TelemetryReadingModel --> db
 ActuationEventModel --> db
-MonitoredDeviceModel --> db
 EnvironmentalProfileModel --> db
 CloudSyncScheduler ..> db : one connection per task
 
 create_app ..> AuthApplicationService : composes
 create_app ..> IamAntiCorruptionLayer : composes
+create_app ..> SyncIamAntiCorruptionLayer : composes
 create_app ..> TelemetryApplicationService : composes
 create_app ..> DeviceRegistryApplicationService : composes
 create_app ..> EnvironmentalProfileApplicationService : composes
+create_app ..> ProfileSynchronizationApplicationService : composes
 create_app ..> TelemetrySynchronizationApplicationService : composes
 create_app ..> CloudSession : composes when CLOUD_SYNC_ENABLED
 create_app ..> CloudSyncScheduler : registry, profiles, telemetry
 create_app ..> iam_api : registers
 create_app ..> tracking_api : registers
+create_app ..> sync_api : registers
 create_app ..> devices_cli : registers
 create_app ..> cloud_cli : registers
 wsgi ..> create_app : starts cloud sync in the worker

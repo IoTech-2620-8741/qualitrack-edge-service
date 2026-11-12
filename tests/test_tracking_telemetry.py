@@ -16,6 +16,8 @@ from tracking.domain.enums import (
 )
 from tracking.domain.errors import TelemetryConflict
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
+from tracking.infrastructure.repositories import ActuationEventRepository as ActuationEventRepositoryImpl
+from tracking.infrastructure.repositories import TelemetryReadingRepository as TelemetryReadingRepositoryImpl
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 
 NOW = datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
@@ -38,21 +40,6 @@ class IamAntiCorruptionLayerTestCase(unittest.TestCase):
             ReportingDevice("CNT-001", DeviceType.CONTAINER_MONITOR),
         )
         self.assertIsNone(layer.authenticated_reporting_device("CNT-001", "invalid"))
-
-    def test_reports_the_nodes_registered_in_this_edge_revoked_ones_included(self):
-        class FakeIamDevice:
-            def __init__(self, device_id, revoked):
-                self.device_id = device_id
-                self.revoked_at = NOW if revoked else None
-
-        class FakeIamAuthenticationService:
-            def list_devices(self):
-                return [FakeIamDevice("ENV-001", False), FakeIamDevice("CNT-009", True)]
-
-        layer = IamAntiCorruptionLayer(FakeIamAuthenticationService())
-
-        self.assertEqual(layer.registered_device_ids(), {"ENV-001", "CNT-009"})
-
 
 class FakeLayer:
     def __init__(self, device):
@@ -285,6 +272,39 @@ class TelemetryRepositoryTestCase(unittest.TestCase):
         self.assertTrue(first.created)
         self.assertFalse(retry.created)
         self.assertEqual(retry.event, first.event)
+
+    def test_deletes_only_the_records_of_a_status_received_before_the_cutoff(self):
+        old, recent = NOW - timedelta(days=10), NOW
+        readings_repository, events_repository = TelemetryReadingRepositoryImpl(), ActuationEventRepositoryImpl()
+        layer = FakeLayer(ReportingDevice("CNT-PURGE", DeviceType.CONTAINER_MONITOR))
+        with self.app.app_context():
+            stored = []
+            for clock in (old, old, recent):
+                moment = clock + timedelta(seconds=len(stored))
+                stored += TelemetryApplicationService(layer, clock=lambda: moment).record_readings(
+                    "CNT-PURGE", "secret", DeviceType.CONTAINER_MONITOR, moment, None, {Metric.TEMPERATURE: 20.0}
+                ).readings
+            readings_repository.save_sync_status(stored[0].synchronized(SyncStatus.SYNCED))
+            readings_repository.save_sync_status(stored[1].synchronized(SyncStatus.REJECTED))
+            readings_repository.save_sync_status(stored[2].synchronized(SyncStatus.SYNCED))
+            cutoff = NOW - timedelta(days=7)
+
+            one = readings_repository.delete_before(SyncStatus.SYNCED, cutoff, limit=1)
+            none = readings_repository.delete_before(SyncStatus.SYNCED, cutoff, limit=10)
+            rejected = readings_repository.delete_before(SyncStatus.REJECTED, cutoff, limit=10)
+            left = [row.id for row in TelemetryReadingModel.select().where(
+                TelemetryReadingModel.device_id == "CNT-PURGE")]
+
+            event_service = TelemetryApplicationService(layer, clock=lambda: old)
+            event = event_service.record_actuation_event(
+                "CNT-PURGE", "secret", ActuationAction.COOLING_ON, None, None, ActuationResult.EXECUTED, old, None
+            ).event
+            events_repository.save_sync_status(event.synchronized(SyncStatus.SYNCED))
+            events_deleted = events_repository.delete_before(SyncStatus.SYNCED, cutoff, limit=10)
+
+        self.assertEqual((one, none, rejected), (1, 0, 1))
+        self.assertEqual(left, [stored[2].id])
+        self.assertEqual(events_deleted, 1)
 
 
 if __name__ == "__main__":

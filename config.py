@@ -18,9 +18,11 @@ class AppConfig(TypedDict):
     PORT: int
     CLOUD_SYNC_ENABLED: bool
     CLOUD_API_URL: str | None
-    CLOUD_USERNAME: str | None
-    CLOUD_PASSWORD: str | None
+    CLOUD_DEVICE_ID: str | None
+    CLOUD_API_KEY: str | None
     CLOUD_SYNC_INTERVAL_SECONDS: int | None
+    SYNCED_RETENTION_DAYS: int
+    REJECTED_RETENTION_DAYS: int
 
 
 def _as_bool(name: str, value: str) -> bool:
@@ -83,6 +85,8 @@ def load_config(project_root: Path) -> AppConfig:
         raise ValueError("HOST cannot be empty")
 
     cloud = _cloud_settings(values, environment_name)
+    synced_retention_days = _retention_days(values, "SYNCED_RETENTION_DAYS", 7)
+    rejected_retention_days = _retention_days(values, "REJECTED_RETENTION_DAYS", 90)
 
     return {
         "APP_ENV": environment_name,
@@ -93,49 +97,96 @@ def load_config(project_root: Path) -> AppConfig:
         "TEST_DEVICE_API_KEY": api_key,
         "HOST": host,
         "PORT": port,
+        "SYNCED_RETENTION_DAYS": synced_retention_days,
+        "REJECTED_RETENTION_DAYS": rejected_retention_days,
         **cloud,
     }
 
 
 def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
-    """Validate the connection with the QualiTrack Cloud REST API.
+    """Validate Edge Gateway cloud connection settings.
 
-    The Edge signs in with the account of an operator (report 5.6). The other
-    settings are required only when the synchronization is enabled.
+    The Edge authenticates using its external device identifier
+    and the API key issued by the QualiTrack Platform IAM.
+
+    Args:
+        values: Environment configuration values.
+        environment_name: Selected application environment.
+
+    Returns:
+        Validated cloud configuration.
+
+    Raises:
+        ValueError: If a required cloud setting is missing
+            or invalid.
     """
-    enabled = _as_bool("CLOUD_SYNC_ENABLED", _required(values, "CLOUD_SYNC_ENABLED"))
+    enabled = _as_bool(
+        "CLOUD_SYNC_ENABLED",
+        _required(values, "CLOUD_SYNC_ENABLED"),
+    )
+
     if not enabled:
         return {
             "CLOUD_SYNC_ENABLED": False,
             "CLOUD_API_URL": None,
-            "CLOUD_USERNAME": None,
-            "CLOUD_PASSWORD": None,
+            "CLOUD_DEVICE_ID": None,
+            "CLOUD_API_KEY": None,
             "CLOUD_SYNC_INTERVAL_SECONDS": None,
         }
 
     url = _required(values, "CLOUD_API_URL").strip().rstrip("/")
+
     if not url.startswith(("http://", "https://")):
-        raise ValueError("CLOUD_API_URL must be an http or https URL")
+        raise ValueError(
+            "CLOUD_API_URL must be an http or https URL"
+        )
     if environment_name == "production" and not url.startswith("https://"):
         raise ValueError("CLOUD_API_URL must use https in production")
-    username = _required(values, "CLOUD_USERNAME").strip()
-    password = _required(values, "CLOUD_PASSWORD")
-    if not username or not password:
-        raise ValueError("CLOUD_USERNAME and CLOUD_PASSWORD are required when the cloud synchronization is enabled")
-    interval_setting = _required(values, "CLOUD_SYNC_INTERVAL_SECONDS")
+    device_id = _required(values, "CLOUD_DEVICE_ID").strip()
+    api_key = _required(values, "CLOUD_API_KEY").strip()
+
+    if not device_id:
+        raise ValueError("CLOUD_DEVICE_ID cannot be empty")
+
+    if not api_key:
+        raise ValueError("CLOUD_API_KEY cannot be empty")
+
     try:
-        interval = int(interval_setting)
+        interval = int(
+            _required(values, "CLOUD_SYNC_INTERVAL_SECONDS")
+        )
     except ValueError as error:
-        raise ValueError("CLOUD_SYNC_INTERVAL_SECONDS must be an integer") from error
+        raise ValueError(
+            "CLOUD_SYNC_INTERVAL_SECONDS must be an integer"
+        ) from error
+
     if interval < 1:
-        raise ValueError("CLOUD_SYNC_INTERVAL_SECONDS must be at least 1")
+        raise ValueError(
+            "CLOUD_SYNC_INTERVAL_SECONDS must be at least 1"
+        )
+
     return {
         "CLOUD_SYNC_ENABLED": True,
         "CLOUD_API_URL": url,
-        "CLOUD_USERNAME": username,
-        "CLOUD_PASSWORD": password,
+        "CLOUD_DEVICE_ID": device_id,
+        "CLOUD_API_KEY": api_key,
         "CLOUD_SYNC_INTERVAL_SECONDS": interval,
     }
+
+
+def _retention_days(values: dict[str, str], name: str, default: int) -> int:
+    """Return the days the Edge keeps a synchronized or rejected record, ``default`` when unset."""
+    setting = values.get(name)
+    if setting is None or not setting.strip():
+        return default
+    try:
+        days = int(setting)
+    except ValueError as error:
+        raise ValueError(f"{name} must be an integer") from error
+    if days < 1:
+        raise ValueError(f"{name} must be at least 1")
+    return days
+
 
 def _required(values: dict[str, str], name: str) -> str:
     """Return a configured value or report the missing environment setting."""

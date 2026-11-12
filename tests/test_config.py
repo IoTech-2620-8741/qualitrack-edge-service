@@ -100,6 +100,33 @@ class LoadConfigTestCase(unittest.TestCase):
             ), self.assertRaisesRegex(ValueError, "TEST_DEVICE_API_KEY"):
                 load_config(root)
 
+    def test_retention_days_default_to_7_and_90_and_can_be_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_environment_file(root, "development")
+            with patch.dict(os.environ, {"APP_ENV": "development"}, clear=True):
+                defaults = load_config(root)
+            with patch.dict(
+                os.environ,
+                {"APP_ENV": "development", "SYNCED_RETENTION_DAYS": "3", "REJECTED_RETENTION_DAYS": " 30 "},
+                clear=True,
+            ):
+                configured = load_config(root)
+
+        self.assertEqual((defaults["SYNCED_RETENTION_DAYS"], defaults["REJECTED_RETENTION_DAYS"]), (7, 90))
+        self.assertEqual((configured["SYNCED_RETENTION_DAYS"], configured["REJECTED_RETENTION_DAYS"]), (3, 30))
+
+    def test_rejects_retention_days_that_are_not_a_positive_integer(self):
+        for name in ("SYNCED_RETENTION_DAYS", "REJECTED_RETENTION_DAYS"):
+            for value, message in (("0", "at least 1"), ("-5", "at least 1"), ("week", "an integer")):
+                with self.subTest(name=name, value=value), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    write_environment_file(root, "development")
+                    with patch.dict(
+                        os.environ, {"APP_ENV": "development", name: value}, clear=True
+                    ), self.assertRaisesRegex(ValueError, f"{name} must be {message}"):
+                        load_config(root)
+
     def test_cloud_settings_are_optional_while_the_synchronization_is_disabled(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -114,39 +141,46 @@ class LoadConfigTestCase(unittest.TestCase):
     def test_loads_the_cloud_connection_when_the_synchronization_is_enabled(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+
             write_environment_file(
                 root,
                 "development",
                 CLOUD_SYNC_ENABLED="true",
                 CLOUD_API_URL="http://localhost:8080/",
-                CLOUD_USERNAME="edge.operator@lab.pe",
+                CLOUD_DEVICE_ID="EDGE-001",
                 CLOUD_SYNC_INTERVAL_SECONDS="60",
             )
+
             with patch.dict(
-                os.environ, {"APP_ENV": "development", "CLOUD_PASSWORD": "local-secret"}, clear=True
+                    os.environ,
+                    {
+                        "APP_ENV": "development",
+                        "CLOUD_API_KEY": "gateway-secret",
+                    },
+                    clear=True,
             ):
                 config = load_config(root)
 
         self.assertTrue(config["CLOUD_SYNC_ENABLED"])
         self.assertEqual(config["CLOUD_API_URL"], "http://localhost:8080")
-        self.assertEqual(config["CLOUD_USERNAME"], "edge.operator@lab.pe")
-        self.assertEqual(config["CLOUD_PASSWORD"], "local-secret")
+        self.assertEqual(config["CLOUD_DEVICE_ID"], "EDGE-001")
+        self.assertEqual(config["CLOUD_API_KEY"], "gateway-secret")
         self.assertEqual(config["CLOUD_SYNC_INTERVAL_SECONDS"], 60)
 
     def test_rejects_an_incomplete_or_insecure_cloud_connection(self):
         enabled = {
             "CLOUD_SYNC_ENABLED": "true",
             "CLOUD_API_URL": "https://cloud.example",
-            "CLOUD_USERNAME": "edge.operator@lab.pe",
-            "CLOUD_PASSWORD": "local-secret",
+            "CLOUD_DEVICE_ID": "EDGE-001",
+            "CLOUD_API_KEY": "gateway-secret",
             "CLOUD_SYNC_INTERVAL_SECONDS": "60",
         }
         for environment, overrides, message in (
-            ("development", {"CLOUD_PASSWORD": ""}, "CLOUD_USERNAME and CLOUD_PASSWORD"),
-            ("development", {"CLOUD_API_URL": "cloud.example"}, "http or https"),
-            ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "0"}, "at least 1"),
-            ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "often"}, "must be an integer"),
-            ("production", {"CLOUD_API_URL": "http://cloud.example"}, "https in production"),
+                ("development", {"CLOUD_API_KEY": ""}, "CLOUD_API_KEY cannot be empty"),
+                ("development", {"CLOUD_DEVICE_ID": ""}, "CLOUD_DEVICE_ID cannot be empty"),
+                ("development", {"CLOUD_API_URL": "cloud.example"}, "http or https"),
+                ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "0"}, "at least 1"),
+                ("development", {"CLOUD_SYNC_INTERVAL_SECONDS": "often"}, "must be an integer"),
         ):
             with self.subTest(overrides=overrides), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)

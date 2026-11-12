@@ -20,11 +20,3 @@ class IamAntiCorruptionLayer:
         if device is None:
             return None
         return ReportingDevice(device.device_id, DeviceType(device.device_type.value))
-
-    def registered_device_ids(self) -> set[str]:
-        """Return the identifiers of the nodes registered in this Edge.
-
-        Revoked nodes are included: they no longer sign in, but the records
-        they sent before can still be synchronized.
-        """
-        return {device.device_id for device in self._iam_authentication_service.list_devices()}

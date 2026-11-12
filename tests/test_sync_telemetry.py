@@ -1,20 +1,26 @@
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
-from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.application.services import SynchronizationSummary, TelemetrySynchronizationApplicationService
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, ReportingDevice, TelemetryReading
+from sync.application.errors import CloudSynchronizationDisabled
+from sync.application.services import (
+    PURGE_PAUSE_SECONDS,
+    SynchronizationSummary,
+    TelemetrySynchronizationApplicationService,
+)
+from sync.domain.entities import MonitoredDevice
+from sync.domain.enums import DeviceStatus
+from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from tracking.domain.entities import ActuationEvent, ReportingDevice, TelemetryReading
 from tracking.domain.enums import (
     ActuationAction,
     ActuationResult,
-    DeviceStatus,
     DeviceType,
     EnvironmentalState,
     Metric,
     SyncStatus,
 )
-from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 
 NOW = datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
 ENVIRONMENTAL = ReportingDevice("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)
@@ -34,6 +40,21 @@ def stored_event(event_id):
     event = ActuationEvent.record(CONTAINER, ActuationAction.VENTILATION_ON, Metric.TEMPERATURE,
                                   EnvironmentalState.WARNING, ActuationResult.EXECUTED, NOW, 3, NOW)
     return event.with_persistence_id(event_id)
+
+
+def received_reading(reading_id, status, days_ago):
+    received_at = NOW - timedelta(days=days_ago)
+    reading = TelemetryReading.record(ENVIRONMENTAL, Metric.AIR_QUALITY, 400.0, received_at, None, received_at)
+    reading = reading.with_persistence_id(reading_id)
+    return reading if status is SyncStatus.PENDING else reading.synchronized(status)
+
+
+def received_event(event_id, status, days_ago):
+    received_at = NOW - timedelta(days=days_ago)
+    event = ActuationEvent.record(CONTAINER, ActuationAction.VENTILATION_ON, Metric.TEMPERATURE,
+                                  EnvironmentalState.WARNING, ActuationResult.EXECUTED, received_at, None, received_at)
+    event = event.with_persistence_id(event_id)
+    return event if status is SyncStatus.PENDING else event.synchronized(status)
 
 
 class SynchronizedTestCase(unittest.TestCase):
@@ -64,6 +85,7 @@ class FakeCloudSession:
         self.status_code = status_code
         self.body = body
         self.requests = []
+        self.device_id = "EDGE-001"
 
     def request(self, method, path, json=None):
         self.requests.append((method, path, json))
@@ -81,9 +103,15 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         self.assertEqual(answer, SyncStatus.SYNCED)
         self.assertEqual(session.requests, [(
             "POST",
-            "/api/v1/laboratories/7/environments/2/telemetry-measurements",
-            {"metric": "AIR_QUALITY", "value": 412.5, "textValue": None,
-             "measuredAt": "2026-11-03T15:00:00Z", "profileVersion": 3},
+            "/api/v1/edge-gateways/EDGE-001/"
+            "iot-devices/15/telemetry-measurements",
+            {
+                "metric": "AIR_QUALITY",
+                "value": 412.5,
+                "textValue": None,
+                "measuredAt": "2026-11-03T15:00:00Z",
+                "profileVersion": 3,
+            },
         )])
 
     def test_sends_container_readings_and_actions_to_the_container_monitor_route(self):
@@ -99,9 +127,9 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         self.assertEqual((reading_answer, event_answer), (SyncStatus.SYNCED, SyncStatus.SYNCED))
         reading_request, event_request = session.requests
         self.assertEqual(reading_request[1],
-                         "/api/v1/laboratories/7/environments/3/container-monitors/16/telemetry-measurements")
+                         "/api/v1/edge-gateways/EDGE-001/iot-devices/16/telemetry-measurements")
         self.assertEqual((reading_request[2]["value"], reading_request[2]["textValue"]), (None, "E200-3412-0001"))
-        self.assertEqual(event_request[1], "/api/v1/laboratories/7/environments/3/container-monitors/16/actuation-events")
+        self.assertEqual(event_request[1], "/api/v1/edge-gateways/EDGE-001/iot-devices/16/actuation-events")
         self.assertEqual(event_request[2], {
             "action": "VENTILATION_ON", "triggerMetric": "TEMPERATURE", "triggerState": "WARNING",
             "result": "EXECUTED", "occurredAt": "2026-11-03T15:00:00Z", "profileVersion": 3,
@@ -111,7 +139,7 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         device = placed("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)
         for status in (400, 404):
             with self.subTest(status=status), self.assertLogs(
-                "tracking.infrastructure.cloud_telemetry_gateway", "WARNING"
+                "sync.infrastructure.cloud_telemetry_gateway", "WARNING"
             ) as logs:
                 gateway = CloudTelemetryGateway(FakeCloudSession(status, {"message": "Invalid reading"}))
                 self.assertEqual(gateway.send_reading(device, stored_reading(1)), SyncStatus.REJECTED)
@@ -133,6 +161,12 @@ class InMemoryRecords:
 
     def status_of(self, record_id):
         return self.records[record_id].sync_status
+
+    def delete_before(self, status, cutoff, limit):
+        doomed = [i for i, r in sorted(self.records.items()) if r.sync_status is status and r.received_at < cutoff]
+        for record_id in doomed[:limit]:
+            del self.records[record_id]
+        return len(doomed[:limit])
 
 
 class InMemoryDevices:
@@ -204,6 +238,98 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
             TelemetrySynchronizationApplicationService(None, self.devices, self.readings, self.events).synchronize_pending()
+
+    def test_retries_actuation_after_cloud_outage(self):
+        """Keep an action pending until Cloud becomes available."""
+        self.devices = InMemoryDevices(
+            placed("CNT-001",DeviceType.CONTAINER_MONITOR,environment_id=2,cloud_device_id=16)
+        )
+        self.readings = InMemoryRecords()
+        self.events = InMemoryRecords(stored_event(1))
+
+        class OfflineGateway(FakeTelemetryGateway):
+            def send_actuation_event(self, device, event):
+                raise CloudUnavailableError("offline")
+        with self.assertRaises(CloudUnavailableError):
+            self.service(OfflineGateway()).synchronize_pending()
+
+        self.assertEqual(self.events.status_of(1),SyncStatus.PENDING)
+        result = self.service(FakeTelemetryGateway()).synchronize_pending()
+        self.assertEqual(result["actuation_events"].synced,1)
+        self.assertEqual(self.events.status_of(1),SyncStatus.SYNCED)
+
+
+
+class PurgeTestCase(unittest.TestCase):
+    def setUp(self):
+        self.now = NOW
+        self.pauses = []
+        self.readings = InMemoryRecords(
+            received_reading(1, SyncStatus.SYNCED, days_ago=8),
+            received_reading(2, SyncStatus.SYNCED, days_ago=6),
+            received_reading(3, SyncStatus.REJECTED, days_ago=91),
+            received_reading(4, SyncStatus.REJECTED, days_ago=89),
+            received_reading(5, SyncStatus.PENDING, days_ago=365),
+        )
+        self.events = InMemoryRecords(
+            received_event(1, SyncStatus.SYNCED, days_ago=8),
+            received_event(2, SyncStatus.REJECTED, days_ago=91),
+            received_event(3, SyncStatus.PENDING, days_ago=365),
+        )
+
+    def service(self):
+        return TelemetrySynchronizationApplicationService(
+            None, InMemoryDevices(), self.readings, self.events,
+            clock=lambda: self.now, sleep=self.pauses.append,
+        )
+
+    def test_deletes_the_synchronized_after_7_days_and_the_rejected_after_90_and_never_the_pending(self):
+        deleted = self.service().purge()
+
+        self.assertEqual(deleted, 4)
+        self.assertEqual(sorted(self.readings.records), [2, 4, 5])
+        self.assertEqual(sorted(self.events.records), [3])
+
+    def test_deletes_in_batches_with_a_pause_between_them(self):
+        self.readings = InMemoryRecords(*(received_reading(i, SyncStatus.SYNCED, days_ago=10) for i in range(1, 6)))
+
+        with patch("sync.application.services.PURGE_BATCH_SIZE", 2):
+            deleted = self.service().purge()
+
+        self.assertEqual(deleted, 7)
+        self.assertEqual(self.readings.records, {})
+        self.assertEqual(self.pauses, [PURGE_PAUSE_SECONDS, PURGE_PAUSE_SECONDS])
+
+    def test_runs_at_most_once_an_hour(self):
+        service = self.service()
+        self.assertEqual(service.purge(), 4)
+        self.readings.records[6] = received_reading(6, SyncStatus.SYNCED, days_ago=10)
+
+        self.now = NOW + timedelta(minutes=59)
+        self.assertEqual(service.purge(), 0)
+        self.assertIn(6, self.readings.records)
+
+        self.now = NOW + timedelta(hours=1)
+        self.assertEqual(service.purge(), 1)
+        self.assertNotIn(6, self.readings.records)
+
+    def test_needs_no_connection_with_the_cloud(self):
+        self.assertEqual(self.service().purge(), 4)
+
+
+    def test_retries_purge_after_repository_failure(self):
+        """Retry cleanup when a previous purge did not finish."""
+        service = self.service()
+
+        with patch.object(self.readings, "delete_before", side_effect=RuntimeError("SQLite temporarily unavailable")):
+            with self.assertRaises(RuntimeError):
+                service.purge()
+
+        deleted = service.purge()
+
+        self.assertEqual(deleted, 4)
+        self.assertEqual(sorted(self.readings.records), [2, 4, 5])
+        self.assertEqual(sorted(self.events.records), [3])
 
 
 if __name__ == "__main__":

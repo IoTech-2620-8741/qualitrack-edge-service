@@ -84,7 +84,6 @@ class ActuationEventRequest(_TelemetryRequest):
     result: ActuationResult = ActuationResult.EXECUTED
     occurred_at: AwareDatetime = Field(..., description="ISO 8601 time of the action with offset.")
 
-
 def _iso(value) -> str:
     return value.isoformat().replace("+00:00", "Z")
 

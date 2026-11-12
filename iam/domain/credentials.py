@@ -61,11 +61,6 @@ class ApiCredential:
         except (AttributeError, TypeError, ValueError) as error:
             raise ValueError("Invalid stored API key verifier") from error
 
-    @classmethod
-    def is_encoded(cls, value: str) -> bool:
-        """Return whether a stored value uses the current verifier format."""
-        return isinstance(value, str) and value.startswith(f"{_SCHEME}$")
-
     def matches(self, secret: str) -> bool:
         """Compare a presented API key with this verifier in constant time."""
         if not isinstance(secret, str) or not secret:

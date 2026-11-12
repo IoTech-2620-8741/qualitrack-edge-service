@@ -25,6 +25,7 @@ Each record includes:
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
+- **Amended by**: ADR-0015, which moves the cloud synchronization to the Sync context
 
 ### Context
 
@@ -156,7 +157,7 @@ operations is exposed over HTTP.
 
 ## ADR-0005: Connect to the cloud with the account of an operator
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0014
 - **Date**: 2026-11-03
 
 ### Context
@@ -187,7 +188,8 @@ that are not ready with their own errors. Production requires `https`.
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended by**: ADR-0011, which keeps only the nodes registered in this Edge
+- **Amended by**: ADR-0011, which keeps only the nodes registered in this Edge;
+  ADR-0015, which moves the registry and the copy of the profiles to Sync
 
 ### Context
 
@@ -344,6 +346,8 @@ and rotates its logs. CI runs the compose file and builds the image for
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
+- **Amended by**: ADR-0014: the cloud now sends only the devices of this Edge
+  Gateway and the Edge caches all of them, also before they are enrolled
 
 ### Context
 
@@ -378,3 +382,194 @@ registered in the Edge that the cloud does not have.
   looked up and kept by hand and lose a node that changes environment.
 - A list of equipment per environment in the cloud, which needs a change and
   a deployment of the cloud and still needs the environments of each station.
+
+## ADR-0012: Delete the telemetry the cloud answered long ago
+
+- **Status**: Accepted
+- **Date**: 2026-11-04
+
+### Context
+
+The Edge stored every reading and action in SQLite and kept it after the cloud
+answered. Nothing deleted a record, so the database of the Raspberry Pi grew
+with every reading until the SD card was full. With 15 nodes that send every
+10 seconds that is about 390,000 records a day, and a full card makes the Edge
+lose the readings it receives.
+
+### Decision
+
+The background synchronization deletes the records the cloud already answered:
+`SYNCED` ones after `SYNCED_RETENTION_DAYS` (7 by default) and `REJECTED` ones
+after `REJECTED_RETENTION_DAYS` (90 by default), counted from the moment the
+Edge received them. `PENDING` records are never deleted. It runs after the
+synchronization of the pending records, at most once an hour, and deletes in
+batches of 2,000 records, each in its own short transaction with a pause of
+50 ms, so the nodes that send readings wait for the single SQLite writer for
+a moment only. It is active by default.
+
+### Consequences
+
+- The database stops growing with the synchronized telemetry. SQLite reuses
+  the freed pages, so the file keeps its size instead of shrinking.
+- The cloud is the only copy of a reading after 7 days. If it accepted a
+  reading and lost it, the Edge cannot send it again.
+- A retry of the same observation after the retention period would be stored
+  as new; the nodes retry within minutes, so this does not happen.
+- `PENDING` records have no expiry, so a node the registry never places in an
+  environment, or a cloud that never accepts a record, still makes the
+  database grow. `flask cloud pending` shows the count.
+- The first purge of a station with a large backlog takes longer, in many
+  batches.
+
+### Alternatives considered
+
+- Deleting each record when the cloud accepts it, which leaves no local copy
+  for diagnosing a cloud problem.
+- One `DELETE` for everything old, which holds the SQLite writer for seconds
+  and stops the nodes from sending.
+- A size limit on the database instead of an age, which would delete
+  `PENDING` records or need a rule to choose which ones.
+
+## ADR-0013: Read the devices of the environments the station serves
+
+- **Status**: Superseded by ADR-0014
+- **Date**: 2026-11-08
+- **Amends**: ADR-0011
+
+### Context
+
+In the review of the Edge, the course asked for the devices to be read per
+environment and not per laboratory. ADR-0011 already keeps only the nodes
+registered in the Edge, but the Edge still downloads the equipment of the
+whole laboratory every cycle. The cloud now lists the equipment of one
+environment (`GET /laboratories/{laboratoryId}/environments/{environmentId}/equipments`),
+and `?iot=true` keeps only its IoT devices.
+
+### Decision
+
+The optional setting `CLOUD_ENVIRONMENT_IDS` lists the cloud environments the
+station serves, such as `3` or `3,5`. When it is set, the registry asks the
+cloud for the IoT devices of each of those environments only. When it is
+empty, the registry reads the equipment of the laboratory, as before. In both
+cases Tracking keeps only the nodes registered in this Edge (ADR-0011). If the
+cloud refuses one environment (for example, 403 for an environment of another
+laboratory), the registry of that cycle stops and the local copy is kept.
+
+### Consequences
+
+- A station with its environments set downloads only their devices, whatever
+  the size of the laboratory.
+- Stations that do not set it keep working without changes.
+- A node the cloud moves to an environment the station does not list leaves
+  the local registry until the setting is updated; its records wait as
+  `PENDING`.
+
+### Alternatives considered
+
+- Making the setting required, which breaks the stations already deployed.
+- Filtering the laboratory list by environment in the Edge, which still
+  downloads the equipment of the whole laboratory.
+
+## ADR-0014: Authenticate as an Edge Gateway and read its devices from the cloud
+
+- **Status**: Accepted
+- **Date**: 2026-11-10
+- **Supersedes**: ADR-0005 and ADR-0013
+- **Amends**: ADR-0011
+
+### Context
+
+The Edge signed in with the account of an operator (ADR-0005) and listed in
+`CLOUD_ENVIRONMENT_IDS` the environments it served (ADR-0013). The station kept
+the password of a person, and the environments had to be looked up and typed
+by hand. The cloud now registers each Edge Gateway as equipment of the
+laboratory, places it in an environment and issues an API key for it. In the
+review of the Edge, the course also set a limit of 15 IoT devices per Edge,
+with several Edges in one environment when it has more devices.
+
+### Decision
+
+The Edge authenticates with `CLOUD_DEVICE_ID`, the identifier of its Gateway
+in the cloud, and `CLOUD_API_KEY`, sent in the `X-API-Key` header of every
+request. It reads its devices from
+`GET /api/v1/edge-gateways/{deviceId}/iot-devices`. The cloud decides which
+devices that is: the IoT devices of the environment of the Gateway,
+distributed by identifier among the Gateways of that environment, 15 for each
+one. The Edge caches every device the cloud sends, also the ones not yet
+registered in its IAM, so a node can enroll with `POST /api/v1/devices/enroll`
+(development only) when the cached registry has it with the same type, in an
+environment and operational. `CLOUD_ENVIRONMENT_IDS`, `CLOUD_USERNAME` and
+`CLOUD_PASSWORD` are no longer read.
+
+### Consequences
+
+- The station keeps no password of a person, and the environment comes from
+  the cloud instead of a setting.
+- The limit of 15 devices and the distribution live in the cloud only; the
+  Edge does not need a change when the rule changes.
+- The API key is shown once in the cloud. A lost key needs a new one, and the
+  Gateway must be placed in an environment and operational to receive it.
+- When a device leaves the environment, the devices after it may move to
+  another Gateway of the environment and must enroll again in that Edge.
+- A `CLOUD_ENVIRONMENT_IDS` line left in the settings of a station is ignored.
+
+### Alternatives considered
+
+- Keeping `CLOUD_ENVIRONMENT_IDS` as an optional filter, which duplicates what
+  the API key already tells the cloud and can contradict it.
+- Linking each device to a Gateway by hand in the cloud, which adds a step
+  for the user that the cloud can work out.
+
+## ADR-0015: Split the cloud synchronization into the Sync context
+
+- **Status**: Accepted
+- **Date**: 2026-11-12
+- **Amends**: ADR-0001, ADR-0006
+
+### Context
+
+Tracking concentrated most of the behavior of the Edge (ADR-0001). It had two
+responsibilities that change for different reasons: attending the nodes, which
+must work while the cloud is unreachable, and exchanging data with the cloud,
+which exists only when the synchronization is enabled. The Edge sends nothing
+to the nodes: each node asks for its configuration.
+
+### Decision
+
+Add the **Sync** bounded context and leave in Tracking only what attends the
+nodes:
+
+- **Tracking** receives the readings and the actions, keeps them with their
+  synchronization status and hands each node the profile it applies, with its
+  thresholds and actuation rules.
+- **Sync** owns the exchange with the cloud: the local copy of the cloud
+  registry (`MonitoredDevice`), the copy of the profiles, the sending of the
+  pending records, their deletion (ADR-0012), the cloud gateways and the
+  `flask cloud` commands. It also owns the enrollment of the nodes the cached
+  registry authorizes (`POST /api/v1/devices/enroll`, ADR-0014), in its own
+  `sync_api` blueprint.
+
+Sync is a conformist of Tracking: it uses the entities and the repository
+contracts of Tracking directly, and it has its own anti-corruption layer with
+IAM to know the nodes of this Edge. Tracking does not depend on Sync, and a
+test checks it. Shared keeps the session with the cloud and the
+synchronization thread. The routes, the commands, the settings and the tables
+do not change.
+
+### Consequences
+
+- Tracking has no cloud code and behaves the same with the synchronization
+  disabled.
+- A change in the model of Tracking can change Sync, which accepts it instead
+  of translating it.
+- The synchronization status stays in the records of Tracking, because it is
+  stored with each one; Sync changes it through `synchronized`.
+- The loggers of the cloud gateways are now named `sync.infrastructure.*`.
+
+### Alternatives considered
+
+- An anti-corruption layer between Sync and Tracking, which duplicates the
+  readings, the actions and the profiles for one process and one database.
+- Moving the cloud registry to IAM, which ADR-0006 already rejected.
+- Evaluating the thresholds in the Edge, which the report leaves to the cloud
+  and to the nodes (ADR-0001).

@@ -1,9 +1,9 @@
 """Flask application entry point for the QualiTrack Edge Service.
 
-This module wires together the Flask application, registers the IAM and Tracking
+This module wires together the Flask application, registers the IAM, Tracking and Sync
 bounded-context Blueprints and the command groups, configures the SQLite
-database, and composes the Tracking-to-IAM anti-corruption layer and the cloud
-synchronization of the Tracking context.
+database, and composes the anti-corruption layers of Tracking and Sync with IAM and the
+cloud synchronization of the Sync context.
 
 Typical usage::
 
@@ -16,6 +16,7 @@ Typical usage::
 
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from flask import Flask
@@ -27,17 +28,22 @@ from iam.interfaces.services import iam_api
 from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, db, init_db
-from tracking.application.services import (
+from sync.application.services import (
     DeviceRegistryApplicationService,
-    EnvironmentalProfileApplicationService,
-    TelemetryApplicationService,
+    ProfileSynchronizationApplicationService,
     TelemetrySynchronizationApplicationService,
 )
-from tracking.infrastructure.cloud_profile_gateway import CloudProfileGateway
-from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
-from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
+from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer as SyncIamAntiCorruptionLayer
+from sync.interfaces.cli import cloud_cli
+from sync.interfaces.services import sync_api
+from tracking.application.services import (
+    EnvironmentalProfileApplicationService,
+    TelemetryApplicationService,
+)
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
-from tracking.interfaces.cli import cloud_cli
 from tracking.interfaces.services import tracking_api
 
 def create_app() -> Flask:
@@ -49,6 +55,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(iam_api)
     app.register_blueprint(tracking_api)
+    app.register_blueprint(sync_api)
     app.cli.add_command(devices_cli)
     app.cli.add_command(cloud_cli)
     iam_authentication_service = AuthApplicationService()
@@ -62,19 +69,25 @@ def create_app() -> Flask:
     if app.config["CLOUD_SYNC_ENABLED"]:
         cloud_session = CloudSession(
             app.config["CLOUD_API_URL"],
-            app.config["CLOUD_USERNAME"],
-            app.config["CLOUD_PASSWORD"],
+            app.config["CLOUD_DEVICE_ID"],
+            app.config["CLOUD_API_KEY"],
         )
         registry_gateway = CloudDeviceRegistryGateway(cloud_session)
         profile_gateway = CloudProfileGateway(cloud_session)
         telemetry_gateway = CloudTelemetryGateway(cloud_session)
-    device_registry_service = DeviceRegistryApplicationService(registry_gateway, iam_anti_corruption_layer)
-    environmental_profile_service = EnvironmentalProfileApplicationService(
-        profile_gateway, iam_anti_corruption_layer
+    device_registry_service = DeviceRegistryApplicationService(
+        registry_gateway, SyncIamAntiCorruptionLayer(iam_authentication_service)
     )
-    telemetry_synchronization_service = TelemetrySynchronizationApplicationService(telemetry_gateway)
+    environmental_profile_service = EnvironmentalProfileApplicationService(iam_anti_corruption_layer)
+    profile_synchronization_service = ProfileSynchronizationApplicationService(profile_gateway)
+    telemetry_synchronization_service = TelemetrySynchronizationApplicationService(
+        telemetry_gateway,
+        synced_retention=timedelta(days=app.config["SYNCED_RETENTION_DAYS"]),
+        rejected_retention=timedelta(days=app.config["REJECTED_RETENTION_DAYS"]),
+    )
     app.extensions["device_registry_service"] = device_registry_service
     app.extensions["environmental_profile_service"] = environmental_profile_service
+    app.extensions["profile_synchronization_service"] = profile_synchronization_service
     app.extensions["telemetry_synchronization_service"] = telemetry_synchronization_service
     if registry_gateway is not None:
         # The registry goes first: it gives the cloud route of each node.
@@ -82,8 +95,9 @@ def create_app() -> Flask:
             app.config["CLOUD_SYNC_INTERVAL_SECONDS"],
             [
                 ("device registry", device_registry_service.synchronize_registry),
-                ("environmental profiles", environmental_profile_service.synchronize_profiles),
+                ("environmental profiles", profile_synchronization_service.synchronize_profiles),
                 ("pending telemetry", telemetry_synchronization_service.synchronize_pending),
+                ("telemetry purge", telemetry_synchronization_service.purge),
             ],
         )
 
