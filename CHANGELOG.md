@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Tracking (tracking): the device registry caches every device the cloud sends for this Edge Gateway, also the ones not yet registered in the Edge (#20).
 
+- Sync (sync): new bounded context that owns the exchange with the cloud: the device registry, the copy of the profiles, the sending of the pending readings and actions, their deletion, the `flask cloud` commands and the enrollment of the nodes (`POST /api/v1/devices/enroll`). Tracking keeps the reception of the telemetry and the configuration it hands to each node, and no longer depends on the cloud. The routes, the commands, the settings and the database do not change; the loggers of the cloud gateways are now named `sync.infrastructure.*` (ADR-0015).
+
 ### Removed
 
 - Settings `CLOUD_USERNAME` and `CLOUD_PASSWORD`: the Edge no longer signs in with the account of an operator (#20, ADR-0014 supersedes ADR-0005).
