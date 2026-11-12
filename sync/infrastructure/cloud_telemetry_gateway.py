@@ -12,7 +12,7 @@ import requests
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
 from sync.domain.entities import MonitoredDevice
 from tracking.domain.entities import ActuationEvent, TelemetryReading
-from tracking.domain.enums import DeviceType, SyncStatus
+from tracking.domain.enums import SyncStatus
 from urllib.parse import quote
 
 LOGGER = logging.getLogger(__name__)
@@ -25,13 +25,6 @@ _REJECTING_STATUSES = {400, 404, 409, 422}
 def _iso(value) -> str:
     return value.isoformat().replace("+00:00", "Z")
 
-
-def _environment_path(device: MonitoredDevice) -> str:
-    return f"/api/v1/laboratories/{device.laboratory_id}/environments/{device.environment_id}"
-
-
-def _container_monitor_path(device: MonitoredDevice) -> str:
-    return f"{_environment_path(device)}/container-monitors/{device.cloud_device_id}"
 
 def _reading_payload(reading: TelemetryReading) -> dict:
     """Build the cloud resource for a telemetry reading."""
