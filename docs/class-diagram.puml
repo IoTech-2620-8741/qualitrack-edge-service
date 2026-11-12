@@ -379,8 +379,8 @@ package "Shared Infrastructure" #E8FFE8 {
   class db <<SqliteDatabase>>
 
   class CloudSession {
-    +__init__(base_url, username, password, http_client=None)
-    +laboratory_id(): int
+    +__init__(base_url, device_id, api_key, http_client=None)
+    +device_id: str
     +request(method, path, json=None): Response
   }
 

@@ -22,6 +22,8 @@ The QualiTrack nodes are:
     rotate their key, revoke them and list them
   - API keys stored as salted PBKDF2 verifiers
   - optional registration of a development test node
+  - enrollment of a node the cloud assigns to this Edge at
+    `POST /api/v1/devices/enroll`, in development only
   - connection with the QualiTrack Cloud REST API as an Edge Gateway, with
     its identifier and its API key in the `X-API-Key` header
   - local copy of the cloud registry of the nodes the cloud assigns to this
@@ -289,6 +291,9 @@ flask --app app devices list
 invalidates the previous one. `flask --app app devices revoke <device_id>`
 stops a node from signing in. These operations are not exposed over HTTP.
 
+In development, a node the cloud assigns to this Edge can also obtain its key
+itself with `POST /api/v1/devices/enroll` (see the API contract).
+
 ### 6. Run the service
 
 ```sh
@@ -399,6 +404,41 @@ active, and presents its matching API key (TS53, TS54).
   "device_id": "ENV-001",
   "device_type": "ENVIRONMENTAL_DEVICE",
   "authenticated": true
+}
+```
+
+### Enroll a node (development only)
+
+`POST /api/v1/devices/enroll`
+
+Gives a node its local API key without the `flask devices register` command.
+The Edge accepts the node when the local copy of the cloud registry has it
+with the same type, placed in an environment and `OPERATIONAL`, and the node
+is not registered in the Edge yet. The node does not prove its identity, so
+the route answers `403` unless `APP_ENV` is `development`.
+
+Header: `Content-Type: application/json`.
+
+```json
+{
+  "device_id": "ENV-001",
+  "device_type": "ENVIRONMENTAL_DEVICE"
+}
+```
+
+| Response | When |
+|---|---|
+| `201 Created` | the node is registered; the API key is shown only this once |
+| `400 Bad Request` | invalid JSON, an empty `device_id`, an unknown type or unexpected fields |
+| `403 Forbidden` | the Edge is not in development, or the cloud registry does not authorize the node |
+| `409 Conflict` | the node is already registered in the Edge |
+| `415 Unsupported Media Type` | the request is not JSON |
+
+```json
+{
+  "device_id": "ENV-001",
+  "device_type": "ENVIRONMENTAL_DEVICE",
+  "api_key": "<api key>"
 }
 ```
 
