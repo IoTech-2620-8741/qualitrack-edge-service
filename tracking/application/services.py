@@ -14,7 +14,7 @@ from tracking.application.errors import (
     DeviceAuthenticationFailed,
     DeviceTypeNotAllowed,
 )
-from tracking.application.gateways import DeviceRegistryGateway, ProfileGateway
+from tracking.application.gateways import DeviceRegistryGateway
 from tracking.domain.entities import (
     ActuationEvent,
     EnvironmentalProfile,
@@ -226,53 +226,22 @@ class NodeConfiguration:
 
 
 class EnvironmentalProfileApplicationService:
-    """Keep the profile of each node and hand it to the node (TS64, TS58, TS59).
+    """Hand each node the profile it applies (TS58, TS59).
 
-    The profiles are copied from the cloud for every node the registry places
-    in an environment; the copy changes only when every profile was read, so
+    The profiles are the local copy the Sync context reads from the cloud, so
     the nodes keep the last one while the cloud is unreachable.
     """
 
     def __init__(
         self,
-        profile_gateway: ProfileGateway | None,
         iam_anti_corruption_layer: IamAntiCorruptionLayer,
-        monitored_device_repository: MonitoredDeviceRepository | None = None,
         environmental_profile_repository: EnvironmentalProfileRepository | None = None,
     ):
-        """Initialize the service; without a gateway the cloud synchronization is disabled."""
-        self.profile_gateway = profile_gateway
+        """Initialize the service with its context integration and repository."""
         self.iam_anti_corruption_layer = iam_anti_corruption_layer
-        self.monitored_device_repository = (
-            monitored_device_repository or MonitoredDeviceRepositoryImpl()
-        )
         self.environmental_profile_repository = (
             environmental_profile_repository or EnvironmentalProfileRepositoryImpl()
         )
-
-    def synchronize_profiles(self) -> list[EnvironmentalProfile]:
-        """Copy the profile of every node the registry places in an environment.
-
-        A node without a profile in the cloud loses its local copy, as does a
-        node the registry no longer has.
-
-        Raises:
-            CloudSynchronizationDisabled: The Edge has no connection with the
-                cloud configured.
-            shared.infrastructure.cloud_session.CloudRequestError: The cloud
-                could not answer; the previous copy is kept.
-        """
-        if self.profile_gateway is None:
-            raise CloudSynchronizationDisabled
-        profiles = []
-        for device in self.monitored_device_repository.find_all():
-            if not device.is_in_environment:
-                continue
-            profile = self.profile_gateway.fetch_profile(device)
-            if profile is not None:
-                profiles.append(profile)
-        self.environmental_profile_repository.replace_all(profiles)
-        return profiles
 
     def configuration_for(self, device_id: str, api_key: str) -> NodeConfiguration:
         """Return the configuration a node applies.

@@ -36,7 +36,7 @@ def synchronize() -> None:
                 "Registered in this Edge but not in the cloud (check their sensorExternalId): "
                 + ", ".join(registry.not_in_cloud)
             )
-        profiles = current_app.extensions["environmental_profile_service"].synchronize_profiles()
+        profiles = current_app.extensions["profile_synchronization_service"].synchronize_profiles()
         click.echo(f"Environmental profiles: {len(profiles)} profile(s) from the cloud")
         summaries = current_app.extensions["telemetry_synchronization_service"].synchronize_pending()
     except CloudSynchronizationDisabled as error:

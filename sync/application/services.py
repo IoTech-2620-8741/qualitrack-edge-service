@@ -1,7 +1,8 @@
 """Application services for the Sync bounded context.
 
-Sync sends to the cloud the readings and actions Tracking keeps pending, and
-deletes the ones the cloud answered long ago.
+Sync copies from the cloud the profile of each node, sends to the cloud the
+readings and actions Tracking keeps pending, and deletes the ones the cloud
+answered long ago.
 """
 import logging
 import time
@@ -9,17 +10,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sync.application.gateways import TelemetryGateway
+from sync.application.gateways import ProfileGateway, TelemetryGateway
 from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.domain.entities import MonitoredDevice
+from tracking.domain.entities import EnvironmentalProfile, MonitoredDevice
 from tracking.domain.enums import SyncStatus
 from tracking.domain.repositories import (
     ActuationEventRepository,
+    EnvironmentalProfileRepository,
     MonitoredDeviceRepository,
     TelemetryReadingRepository,
 )
 from tracking.infrastructure.repositories import (
     ActuationEventRepository as ActuationEventRepositoryImpl,
+    EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
     MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl,
     TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
 )
@@ -170,3 +173,51 @@ class TelemetrySynchronizationApplicationService:
                 else:
                     rejected += 1
         return SynchronizationSummary(synced, rejected, waiting)
+
+
+class ProfileSynchronizationApplicationService:
+    """Keep the local copy of the profile of each node (TS64).
+
+    The profiles are copied from the cloud for every node the registry places
+    in an environment; the copy changes only when every profile was read, so
+    the nodes keep the last one while the cloud is unreachable.
+    """
+
+    def __init__(
+        self,
+        profile_gateway: ProfileGateway | None,
+        monitored_device_repository: MonitoredDeviceRepository | None = None,
+        environmental_profile_repository: EnvironmentalProfileRepository | None = None,
+    ):
+        """Initialize the service; without a gateway the cloud synchronization is disabled."""
+        self.profile_gateway = profile_gateway
+        self.monitored_device_repository = (
+            monitored_device_repository or MonitoredDeviceRepositoryImpl()
+        )
+        self.environmental_profile_repository = (
+            environmental_profile_repository or EnvironmentalProfileRepositoryImpl()
+        )
+
+    def synchronize_profiles(self) -> list[EnvironmentalProfile]:
+        """Copy the profile of every node the registry places in an environment.
+
+        A node without a profile in the cloud loses its local copy, as does a
+        node the registry no longer has.
+
+        Raises:
+            CloudSynchronizationDisabled: The Edge has no connection with the
+                cloud configured.
+            shared.infrastructure.cloud_session.CloudRequestError: The cloud
+                could not answer; the previous copy is kept.
+        """
+        if self.profile_gateway is None:
+            raise CloudSynchronizationDisabled
+        profiles = []
+        for device in self.monitored_device_repository.find_all():
+            if not device.is_in_environment:
+                continue
+            profile = self.profile_gateway.fetch_profile(device)
+            if profile is not None:
+                profiles.append(profile)
+        self.environmental_profile_repository.replace_all(profiles)
+        return profiles

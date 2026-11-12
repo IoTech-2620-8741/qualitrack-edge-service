@@ -1,6 +1,6 @@
 """Cloud gateway that reads the environmental profile of each node (TS64).
 
-It is the anti-corruption layer between Tracking and the Tracking & Telemetry
+It is the anti-corruption layer between Sync and the Tracking & Telemetry
 context of the cloud: it reads the profile a node applies and translates the
 resource of the QualiTrack Cloud REST API into an
 :class:`~tracking.domain.entities.EnvironmentalProfile`.
