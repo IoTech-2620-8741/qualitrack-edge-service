@@ -5,8 +5,17 @@ implementations into the services.
 """
 from typing import Protocol
 
-from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, MonitoredDevice, TelemetryReading
+from sync.domain.entities import MonitoredDevice
+from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, TelemetryReading
 from tracking.domain.enums import SyncStatus
+
+
+class DeviceRegistryGateway(Protocol):
+    """Source of the nodes the cloud registers for the laboratory of the Edge."""
+
+    def fetch_devices(self) -> list[MonitoredDevice]:
+        """Read the environmental devices and container monitors of the laboratory."""
+        ...
 
 
 class ProfileGateway(Protocol):

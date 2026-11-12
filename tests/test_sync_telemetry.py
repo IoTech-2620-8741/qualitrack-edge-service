@@ -3,18 +3,19 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
+from sync.application.errors import CloudSynchronizationDisabled
 from sync.application.services import (
     PURGE_PAUSE_SECONDS,
     SynchronizationSummary,
     TelemetrySynchronizationApplicationService,
 )
+from sync.domain.entities import MonitoredDevice
+from sync.domain.enums import DeviceStatus
 from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
-from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, ReportingDevice, TelemetryReading
+from tracking.domain.entities import ActuationEvent, ReportingDevice, TelemetryReading
 from tracking.domain.enums import (
     ActuationAction,
     ActuationResult,
-    DeviceStatus,
     DeviceType,
     EnvironmentalState,
     Metric,

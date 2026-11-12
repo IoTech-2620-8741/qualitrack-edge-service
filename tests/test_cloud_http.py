@@ -7,16 +7,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from app import create_app
 from shared.infrastructure.cloud_session import CloudSession
 from sync.application.services import (
+    DeviceRegistryApplicationService,
     ProfileSynchronizationApplicationService,
     TelemetrySynchronizationApplicationService,
 )
 from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
+from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
 from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
-from tracking.application.services import DeviceRegistryApplicationService
-from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from sync.infrastructure.repositories import MonitoredDeviceRepository
 from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
-from tracking.infrastructure.repositories import EnvironmentalProfileRepository, MonitoredDeviceRepository
+from tracking.infrastructure.repositories import EnvironmentalProfileRepository
 
 _GATEWAY = "/api/v1/edge-gateways/EDGE-001"
 _REGISTRY = f"{_GATEWAY}/iot-devices"
@@ -127,7 +128,7 @@ class CloudOverHttpTestCase(unittest.TestCase):
             EnvironmentalProfileRepository().replace_all([])
 
     def layer(self):
-        return self.app.extensions["environmental_profile_service"].iam_anti_corruption_layer
+        return self.app.extensions["device_registry_service"].iam_anti_corruption_layer
 
     def service(self, api_key):
         session = CloudSession(self.base_url, "EDGE-001", api_key)

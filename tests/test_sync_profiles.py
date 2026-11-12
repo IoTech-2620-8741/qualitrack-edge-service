@@ -2,12 +2,13 @@ import unittest
 from datetime import UTC, datetime
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
+from sync.application.errors import CloudSynchronizationDisabled
 from sync.application.services import ProfileSynchronizationApplicationService
+from sync.domain.entities import MonitoredDevice
+from sync.domain.enums import DeviceStatus
 from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
 from tests.test_tracking_profiles import NOW, TEMPERATURE, VENTILATION, InMemoryProfiles, profile
-from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.domain.entities import MonitoredDevice
-from tracking.domain.enums import DeviceStatus, DeviceType
+from tracking.domain.enums import DeviceType
 from tracking.domain.value_objects import ProfileVersion
 
 

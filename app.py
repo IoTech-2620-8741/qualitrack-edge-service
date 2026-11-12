@@ -1,9 +1,9 @@
 """Flask application entry point for the QualiTrack Edge Service.
 
-This module wires together the Flask application, registers the IAM and Tracking
+This module wires together the Flask application, registers the IAM, Tracking and Sync
 bounded-context Blueprints and the command groups, configures the SQLite
-database, and composes the Tracking-to-IAM anti-corruption layer and the cloud
-synchronization of the Sync context.
+database, and composes the anti-corruption layers of Tracking and Sync with IAM and the
+cloud synchronization of the Sync context.
 
 Typical usage::
 
@@ -29,18 +29,20 @@ from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, db, init_db
 from sync.application.services import (
+    DeviceRegistryApplicationService,
     ProfileSynchronizationApplicationService,
     TelemetrySynchronizationApplicationService,
 )
 from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
+from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
 from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer as SyncIamAntiCorruptionLayer
 from sync.interfaces.cli import cloud_cli
+from sync.interfaces.services import sync_api
 from tracking.application.services import (
-    DeviceRegistryApplicationService,
     EnvironmentalProfileApplicationService,
     TelemetryApplicationService,
 )
-from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 from tracking.interfaces.services import tracking_api
 
@@ -53,6 +55,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(iam_api)
     app.register_blueprint(tracking_api)
+    app.register_blueprint(sync_api)
     app.cli.add_command(devices_cli)
     app.cli.add_command(cloud_cli)
     iam_authentication_service = AuthApplicationService()
@@ -72,7 +75,9 @@ def create_app() -> Flask:
         registry_gateway = CloudDeviceRegistryGateway(cloud_session)
         profile_gateway = CloudProfileGateway(cloud_session)
         telemetry_gateway = CloudTelemetryGateway(cloud_session)
-    device_registry_service = DeviceRegistryApplicationService(registry_gateway, iam_anti_corruption_layer)
+    device_registry_service = DeviceRegistryApplicationService(
+        registry_gateway, SyncIamAntiCorruptionLayer(iam_authentication_service)
+    )
     environmental_profile_service = EnvironmentalProfileApplicationService(iam_anti_corruption_layer)
     profile_synchronization_service = ProfileSynchronizationApplicationService(profile_gateway)
     telemetry_synchronization_service = TelemetrySynchronizationApplicationService(

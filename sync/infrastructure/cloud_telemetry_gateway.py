@@ -10,7 +10,8 @@ import logging
 import requests
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, TelemetryReading
+from sync.domain.entities import MonitoredDevice
+from tracking.domain.entities import ActuationEvent, TelemetryReading
 from tracking.domain.enums import DeviceType, SyncStatus
 from urllib.parse import quote
 

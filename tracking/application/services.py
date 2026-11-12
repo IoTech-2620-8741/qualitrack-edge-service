@@ -1,27 +1,21 @@
 """Application services for the Tracking bounded context.
 
 Application services coordinate Tracking use cases: they authenticate nodes
-through the IAM anti-corruption layer, read the cloud through injected
-gateways, invoke domain behavior and persist the outcome through repositories.
+through the IAM anti-corruption layer, invoke domain behavior and persist the
+outcome through repositories.
 """
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-
 from tracking.application.errors import (
-    CloudSynchronizationDisabled,
     ConfigurationNotAvailable,
     DeviceAuthenticationFailed,
     DeviceTypeNotAllowed,
-    DeviceAlreadyEnrolled,
-    DeviceEnrollmentNotAllowed
 )
-from tracking.application.gateways import DeviceRegistryGateway
 from tracking.domain.entities import (
     ActuationEvent,
     EnvironmentalProfile,
-    MonitoredDevice,
     ReportingDevice,
     TelemetryReading,
 )
@@ -32,24 +26,20 @@ from tracking.domain.enums import (
     EnvironmentalState,
     Metric,
 )
-
-from tracking.domain.enums import DeviceStatus
-
 from tracking.domain.repositories import (
     ActuationEventRepository,
     ActuationEventSaveResult,
     EnvironmentalProfileRepository,
-    MonitoredDeviceRepository,
     TelemetryReadingRepository,
     TelemetryReadingSaveResult,
 )
 from tracking.infrastructure.repositories import (
     ActuationEventRepository as ActuationEventRepositoryImpl,
     EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
-    MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl,
     TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
 )
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
+
 
 class TelemetryApplicationService:
     """Accept the readings and actions of the nodes and keep them pending.
@@ -153,129 +143,6 @@ class TelemetryApplicationService:
         if reporting_device.device_type is not device_type:
             raise DeviceTypeNotAllowed
         return reporting_device
-
-
-@dataclass(frozen=True)
-class RegistrySynchronization:
-    """Outcome of one read of the cloud registry.
-
-    Attributes:
-        devices: Nodes of this Edge the cloud registers, now in the local copy.
-        not_in_cloud: Nodes registered in this Edge that the cloud does not
-            register as IoT devices with that ``sensorExternalId``; their
-            records wait until the cloud registers them.
-    """
-
-    devices: list[MonitoredDevice]
-    not_in_cloud: list[str]
-
-
-class DeviceRegistryApplicationService:
-    """Keep the local copy of the nodes of this Edge, as the cloud registers them.
-
-    The cloud is the source of truth of the registry, but the laboratory may
-    have nodes in environments other stations serve. The Edge keeps only the
-    nodes registered in it with ``flask devices register``, which IAM knows,
-    so it reads the profiles of its own nodes only. The local copy gives the
-    Edge the cloud identifiers it synchronizes telemetry to, and it stays
-    available while the cloud is unreachable.
-    """
-
-    def __init__(
-        self,
-        registry_gateway: DeviceRegistryGateway | None,
-        iam_anti_corruption_layer: IamAntiCorruptionLayer,
-        monitored_device_repository: MonitoredDeviceRepository | None = None,
-    ):
-        """Initialize the service; without a gateway the cloud synchronization is disabled."""
-        self.registry_gateway = registry_gateway
-        self.iam_anti_corruption_layer = iam_anti_corruption_layer
-        self.monitored_device_repository = (
-            monitored_device_repository or MonitoredDeviceRepositoryImpl()
-        )
-
-    def synchronize_registry(self) -> RegistrySynchronization:
-        """Synchronize all IoT devices assigned to this Edge Gateway.
-
-        The cloud registry is cached independently from local IAM.
-        Devices can therefore be discovered before enrollment.
-
-        Returns:
-            The synchronized devices and locally registered devices
-            no longer found in the cloud registry.
-        """
-        if self.registry_gateway is None:
-            raise CloudSynchronizationDisabled
-
-        devices = self.registry_gateway.fetch_devices()
-
-        # Cache all cloud devices, including those not yet enrolled in IAM.
-        self.monitored_device_repository.replace_all(devices)
-
-        registered = self.iam_anti_corruption_layer.registered_device_ids()
-        in_cloud = {device.device_id for device in devices}
-
-        return RegistrySynchronization(devices, sorted(registered - in_cloud))
-
-    def monitored_devices(self) -> list[MonitoredDevice]:
-        """Return the local copy of the registry, ordered by identifier."""
-        return self.monitored_device_repository.find_all()
-
-    def find_monitored_device(self, device_id: str) -> MonitoredDevice | None:
-        """Return the cloud registration of one node, if the cloud registers it."""
-        return self.monitored_device_repository.find_by_device_id(device_id)
-
-    def enroll_device(
-        self,
-        device_id: str,
-        device_type: DeviceType,
-    ) -> str:
-        """Enroll an IoT device authorized by the cached cloud registry.
-
-        The device must match the identifier and type registered
-        in the cloud, be operational, and have an assigned environment.
-
-        Existing local credentials are never regenerated.
-
-        Args:
-            device_id: Identifier presented by the ESP32.
-            device_type: Device type presented by the ESP32.
-
-        Returns:
-            Newly generated local IAM API key.
-
-        Raises:
-            DeviceEnrollmentNotAllowed: If the device is not
-                authorized by the cached cloud registry.
-            DeviceAlreadyEnrolled: If local IAM already knows
-                this device.
-        """
-        device = self.monitored_device_repository.find_by_device_id(
-            device_id
-        )
-
-        if (
-            device is None
-            or device.device_type is not device_type
-            or not device.is_in_environment
-            or device.status is not DeviceStatus.OPERATIONAL
-        ):
-            raise DeviceEnrollmentNotAllowed
-
-        registered = self.iam_anti_corruption_layer.registered_device_ids()
-
-        if device_id in registered:
-            raise DeviceAlreadyEnrolled
-
-        try:
-            return self.iam_anti_corruption_layer.enroll_device(
-                device_id,
-                device_type,
-            )
-        except ValueError as error:
-            if str(error) == "Device is already registered":
-                raise DeviceAlreadyEnrolled from error
-            raise
 
 
 @dataclass(frozen=True)
