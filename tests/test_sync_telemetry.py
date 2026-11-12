@@ -3,23 +3,24 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
-from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.application.services import (
+from sync.application.errors import CloudSynchronizationDisabled
+from sync.application.services import (
     PURGE_PAUSE_SECONDS,
     SynchronizationSummary,
     TelemetrySynchronizationApplicationService,
 )
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, ReportingDevice, TelemetryReading
+from sync.domain.entities import MonitoredDevice
+from sync.domain.enums import DeviceStatus
+from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from tracking.domain.entities import ActuationEvent, ReportingDevice, TelemetryReading
 from tracking.domain.enums import (
     ActuationAction,
     ActuationResult,
-    DeviceStatus,
     DeviceType,
     EnvironmentalState,
     Metric,
     SyncStatus,
 )
-from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 
 NOW = datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
 ENVIRONMENTAL = ReportingDevice("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)
@@ -138,7 +139,7 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         device = placed("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)
         for status in (400, 404):
             with self.subTest(status=status), self.assertLogs(
-                "tracking.infrastructure.cloud_telemetry_gateway", "WARNING"
+                "sync.infrastructure.cloud_telemetry_gateway", "WARNING"
             ) as logs:
                 gateway = CloudTelemetryGateway(FakeCloudSession(status, {"message": "Invalid reading"}))
                 self.assertEqual(gateway.send_reading(device, stored_reading(1)), SyncStatus.REJECTED)
@@ -292,7 +293,7 @@ class PurgeTestCase(unittest.TestCase):
     def test_deletes_in_batches_with_a_pause_between_them(self):
         self.readings = InMemoryRecords(*(received_reading(i, SyncStatus.SYNCED, days_ago=10) for i in range(1, 6)))
 
-        with patch("tracking.application.services.PURGE_BATCH_SIZE", 2):
+        with patch("sync.application.services.PURGE_BATCH_SIZE", 2):
             deleted = self.service().purge()
 
         self.assertEqual(deleted, 7)

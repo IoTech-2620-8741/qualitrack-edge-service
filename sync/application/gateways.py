@@ -1,11 +1,12 @@
-"""Contracts of the cloud gateways used by the Tracking application services.
+"""Contracts of the cloud gateways used by the Sync application services.
 
 The infrastructure layer implements them, and ``app.py`` injects the
 implementations into the services.
 """
 from typing import Protocol
 
-from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, MonitoredDevice, TelemetryReading
+from sync.domain.entities import MonitoredDevice
+from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, TelemetryReading
 from tracking.domain.enums import SyncStatus
 
 

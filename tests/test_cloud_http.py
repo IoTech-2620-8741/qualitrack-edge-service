@@ -6,17 +6,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app import create_app
 from shared.infrastructure.cloud_session import CloudSession
-from tracking.application.services import (
+from sync.application.services import (
     DeviceRegistryApplicationService,
-    EnvironmentalProfileApplicationService,
+    ProfileSynchronizationApplicationService,
     TelemetrySynchronizationApplicationService,
 )
-from tracking.infrastructure.cloud_profile_gateway import CloudProfileGateway
-from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
-from tracking.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
+from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from sync.infrastructure.repositories import MonitoredDeviceRepository
 from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
-from tracking.infrastructure.repositories import EnvironmentalProfileRepository, MonitoredDeviceRepository
+from tracking.infrastructure.repositories import EnvironmentalProfileRepository
 
 _GATEWAY = "/api/v1/edge-gateways/EDGE-001"
 _REGISTRY = f"{_GATEWAY}/iot-devices"
@@ -127,7 +128,7 @@ class CloudOverHttpTestCase(unittest.TestCase):
             EnvironmentalProfileRepository().replace_all([])
 
     def layer(self):
-        return self.app.extensions["environmental_profile_service"].iam_anti_corruption_layer
+        return self.app.extensions["device_registry_service"].iam_anti_corruption_layer
 
     def service(self, api_key):
         session = CloudSession(self.base_url, "EDGE-001", api_key)
@@ -149,8 +150,8 @@ class CloudOverHttpTestCase(unittest.TestCase):
         layer = self.layer()
         services = {
             "device_registry_service": DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session), layer),
-            "environmental_profile_service": EnvironmentalProfileApplicationService(
-                CloudProfileGateway(session), layer),
+            "profile_synchronization_service": ProfileSynchronizationApplicationService(
+                CloudProfileGateway(session)),
             "telemetry_synchronization_service": TelemetrySynchronizationApplicationService(
                 CloudTelemetryGateway(session)),
         }

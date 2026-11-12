@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py config.py wsgi.py gunicorn.conf.py ./
 COPY iam ./iam
 COPY tracking ./tracking
+COPY sync ./sync
 COPY shared ./shared
 
 # The service runs without root; the SQLite database lives in the /data volume.

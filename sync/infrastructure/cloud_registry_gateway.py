@@ -1,16 +1,18 @@
 """Cloud gateway that reads the device registry of the laboratory.
 
 It is the anti-corruption layer between the Equipment context of the cloud
-and Tracking: it turns the equipment resources of the QualiTrack Cloud REST API
-into :class:`~tracking.domain.entities.MonitoredDevice` concepts.
+and Sync: it turns the equipment resources of the QualiTrack Cloud REST API
+into :class:`~sync.domain.entities.MonitoredDevice` concepts.
 """
 import logging
 from datetime import UTC, datetime
 
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudSession
-from tracking.domain.entities import MonitoredDevice
-from tracking.domain.enums import DeviceStatus, DeviceType
 from urllib.parse import quote
+
+from sync.domain.entities import MonitoredDevice
+from sync.domain.enums import DeviceStatus
+from tracking.domain.enums import DeviceType
 
 LOGGER = logging.getLogger(__name__)
 

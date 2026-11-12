@@ -25,6 +25,7 @@ Each record includes:
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
+- **Amended by**: ADR-0015, which moves the cloud synchronization to the Sync context
 
 ### Context
 
@@ -187,7 +188,8 @@ that are not ready with their own errors. Production requires `https`.
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended by**: ADR-0011, which keeps only the nodes registered in this Edge
+- **Amended by**: ADR-0011, which keeps only the nodes registered in this Edge;
+  ADR-0015, which moves the registry and the copy of the profiles to Sync
 
 ### Context
 
@@ -517,3 +519,57 @@ environment and operational. `CLOUD_ENVIRONMENT_IDS`, `CLOUD_USERNAME` and
   the API key already tells the cloud and can contradict it.
 - Linking each device to a Gateway by hand in the cloud, which adds a step
   for the user that the cloud can work out.
+
+## ADR-0015: Split the cloud synchronization into the Sync context
+
+- **Status**: Accepted
+- **Date**: 2026-11-12
+- **Amends**: ADR-0001, ADR-0006
+
+### Context
+
+Tracking concentrated most of the behavior of the Edge (ADR-0001). It had two
+responsibilities that change for different reasons: attending the nodes, which
+must work while the cloud is unreachable, and exchanging data with the cloud,
+which exists only when the synchronization is enabled. The Edge sends nothing
+to the nodes: each node asks for its configuration.
+
+### Decision
+
+Add the **Sync** bounded context and leave in Tracking only what attends the
+nodes:
+
+- **Tracking** receives the readings and the actions, keeps them with their
+  synchronization status and hands each node the profile it applies, with its
+  thresholds and actuation rules.
+- **Sync** owns the exchange with the cloud: the local copy of the cloud
+  registry (`MonitoredDevice`), the copy of the profiles, the sending of the
+  pending records, their deletion (ADR-0012), the cloud gateways and the
+  `flask cloud` commands. It also owns the enrollment of the nodes the cached
+  registry authorizes (`POST /api/v1/devices/enroll`, ADR-0014), in its own
+  `sync_api` blueprint.
+
+Sync is a conformist of Tracking: it uses the entities and the repository
+contracts of Tracking directly, and it has its own anti-corruption layer with
+IAM to know the nodes of this Edge. Tracking does not depend on Sync, and a
+test checks it. Shared keeps the session with the cloud and the
+synchronization thread. The routes, the commands, the settings and the tables
+do not change.
+
+### Consequences
+
+- Tracking has no cloud code and behaves the same with the synchronization
+  disabled.
+- A change in the model of Tracking can change Sync, which accepts it instead
+  of translating it.
+- The synchronization status stays in the records of Tracking, because it is
+  stored with each one; Sync changes it through `synchronized`.
+- The loggers of the cloud gateways are now named `sync.infrastructure.*`.
+
+### Alternatives considered
+
+- An anti-corruption layer between Sync and Tracking, which duplicates the
+  readings, the actions and the profiles for one process and one database.
+- Moving the cloud registry to IAM, which ADR-0006 already rejected.
+- Evaluating the thresholds in the Edge, which the report leaves to the cloud
+  and to the nodes (ADR-0001).
