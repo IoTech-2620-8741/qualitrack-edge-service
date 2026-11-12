@@ -1,4 +1,4 @@
-"""Command-line interface for the cloud synchronization of the Tracking context.
+"""Command-line interface for the cloud synchronization of the Sync context.
 
 ``cloud sync`` runs now what the background thread runs every interval: it
 reads the device registry, copies the profile of each node and sends the
@@ -54,7 +54,7 @@ def synchronize() -> None:
 @cloud_cli.command("pending")
 def show_pending() -> None:
     """Count the readings and actions stored by synchronization status (TS60)."""
-    counts = current_app.extensions["telemetry_service"].pending_counts()
+    counts = current_app.extensions["telemetry_synchronization_service"].pending_counts()
     for label, key in (("Readings", "readings"), ("Actuation events", "actuation_events")):
         by_status = ", ".join(f"{status.value} {total}" for status, total in counts[key].items())
         click.echo(f"{label}: {by_status}")
