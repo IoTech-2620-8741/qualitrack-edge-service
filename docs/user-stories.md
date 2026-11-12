@@ -31,7 +31,7 @@ interface layers, and the shared infrastructure.
 | TS59 | Deliver the configuration to the container monitor from the Edge | Tracking; IAM (authentication) | Same elements as TS58, with the profile of the container monitor and its `ActuationRule` values |
 | TS60 | Keep the pending records in the Edge | Tracking; Sync (pending command) | `tracking/domain/enums.py`: `SyncStatus`; `tracking/infrastructure/models.py`: `TelemetryReading`, `ActuationEvent`; `tracking/infrastructure/repositories.py`: `save_idempotently`, `find_pending`, `count_by_sync_status`; `sync/application/services.py`: `TelemetrySynchronizationApplicationService.pending_counts`; `sync/interfaces/cli.py`: `show_pending` |
 | TS61 | Synchronize the pending environmental telemetry with the cloud | Sync; Tracking (pending records); Shared (cloud session) | `sync/application/services.py`: `TelemetrySynchronizationApplicationService.synchronize_pending`; `sync/infrastructure/cloud_telemetry_gateway.py`: `CloudTelemetryGateway.send_reading`; `shared/infrastructure/cloud_session.py`: `CloudSession`; `shared/infrastructure/cloud_sync_scheduler.py`: `CloudSyncScheduler` |
-| TS62 | Synchronize the pending container telemetry with the cloud | Sync; Tracking (pending records); Shared (cloud session) | Same elements as TS61, with the container monitor route |
+| TS62 | Synchronize the pending container telemetry with the cloud | Sync; Tracking (pending records); Shared (cloud session) | Same elements as TS61, with the readings of a container monitor |
 | TS63 | Synchronize the pending actuation events with the cloud | Sync; Tracking (pending records); Shared (cloud session) | `sync/infrastructure/cloud_telemetry_gateway.py`: `CloudTelemetryGateway.send_actuation_event`; the same application service and shared elements as TS61 |
 | TS64 | Synchronize the configurations from the cloud to the Edge | Sync; Tracking (profiles); IAM (nodes of this Edge); Shared (cloud session) | `sync/application/services.py`: `DeviceRegistryApplicationService.synchronize_registry`, `ProfileSynchronizationApplicationService.synchronize_profiles`; `sync/integration/iam_anti_corruption_layer.py`: `IamAntiCorruptionLayer.registered_device_ids`; `sync/infrastructure/cloud_registry_gateway.py`: `CloudDeviceRegistryGateway`; `sync/infrastructure/cloud_profile_gateway.py`: `CloudProfileGateway`; `sync/interfaces/cli.py`: `synchronize` |
 
@@ -226,7 +226,7 @@ As a Developer, I want to synchronize the pending environmental measurements and
 Acceptance criteria:
 - Scenario: Accepted reading
   - Given a pending reading of an environmental device that the cloud registry places in an environment
-  - When the synchronization sends it to `POST /api/v1/laboratories/{laboratoryId}/environments/{environmentId}/telemetry-measurements` with the token of the operator account
+  - When the synchronization sends it to `POST /api/v1/edge-gateways/{gatewayId}/iot-devices/{deviceId}/telemetry-measurements` with the API key of the Edge Gateway in the `X-API-Key` header
   - And the cloud answers `201 Created`, or `200 OK` because it already had it
   - Then the reading becomes `SYNCED`
 
@@ -248,7 +248,7 @@ As a Developer, I want to synchronize the pending container measurements from th
 Acceptance criteria:
 - Scenario: Accepted reading
   - Given a pending reading of a container monitor placed in an environment
-  - When the synchronization sends it to `POST /api/v1/laboratories/{laboratoryId}/environments/{environmentId}/container-monitors/{deviceId}/telemetry-measurements`
+  - When the synchronization sends it to `POST /api/v1/edge-gateways/{gatewayId}/iot-devices/{deviceId}/telemetry-measurements`
   - Then the reading becomes `SYNCED` on `201` or `200`, and `REJECTED` on `400`, `404`, `409` or `422`
 
 - Scenario: Oldest first
@@ -264,13 +264,13 @@ As a Developer, I want to synchronize the actuation events of the containers fro
 Acceptance criteria:
 - Scenario: Accepted action
   - Given a pending action of a container monitor placed in an environment
-  - When the synchronization sends it to `POST /api/v1/laboratories/{laboratoryId}/environments/{environmentId}/container-monitors/{deviceId}/actuation-events`
+  - When the synchronization sends it to `POST /api/v1/edge-gateways/{gatewayId}/iot-devices/{deviceId}/actuation-events`
   - Then the action becomes `SYNCED` on `201` or `200`, and `REJECTED` on `400`, `404`, `409` or `422`
 
-- Scenario: Expired token of the operator account
-  - Given the cloud answers `401` because the token expired
+- Scenario: API key of the Edge Gateway refused
+  - Given the cloud answers `401` or `403` to the API key of the Edge Gateway
   - When the synchronization sends a record
-  - Then the Edge signs in again once and repeats the request
+  - Then the synchronization stops, the record stays `PENDING` and the next cycle retries it
 
 ---
 
@@ -279,16 +279,15 @@ As a Developer, I want to get from the cloud the current configurations of both 
 
 Acceptance criteria:
 - Scenario: Registry and profiles copied
-  - Given the operator account of the Edge can access the laboratory
-  - When the synchronization reads `GET /api/v1/laboratories/{laboratoryId}/equipments` and, for each node of this Edge placed in an environment, `GET /api/v1/laboratories/{laboratoryId}/environments/{environmentId}/devices/{deviceId}/environmental-profile`
+  - Given the cloud accepts the API key of the Edge Gateway
+  - When the synchronization reads `GET /api/v1/edge-gateways/{gatewayId}/iot-devices` and, for each node placed in an environment, `GET /api/v1/edge-gateways/{gatewayId}/iot-devices/{deviceId}/environmental-profile`
   - Then the Edge keeps the cloud identifiers of each node and the profile it applies with its version
   - And `flask cloud devices` and `flask cloud profiles` list them
 
-- Scenario: Nodes of other stations
-  - Given the laboratory has nodes in environments another station serves
-  - And they are not registered in this Edge with `flask devices register`
+- Scenario: Nodes of this Edge Gateway only
+  - Given the cloud assigns to each Edge Gateway the IoT devices it serves
   - When the synchronization reads the registry
-  - Then the Edge keeps only the nodes registered in it and reads only their profiles
+  - Then the Edge keeps every node the cloud sends for its Gateway, also the ones not yet registered in it, and reads their profiles
 
 - Scenario: Node registered in the Edge but not in the cloud
   - Given a node registered in this Edge whose `sensorExternalId` the cloud does not have

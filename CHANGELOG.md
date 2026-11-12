@@ -7,27 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-12
+
 ### Added
 
-- Tracking (tracking): the background synchronization deletes the readings and actions the cloud already answered: the `SYNCED` ones after `SYNCED_RETENTION_DAYS` (7 by default) and the `REJECTED` ones after `REJECTED_RETENTION_DAYS` (90 by default), at most once an hour and in batches of 2,000 records. Pending records are never deleted. It is active by default, so `flask cloud pending` shows fewer `SYNCED` records as time goes by (ADR-0012).
+- Sync (sync): the background synchronization deletes the readings and actions the cloud already answered: the `SYNCED` ones after `SYNCED_RETENTION_DAYS` (7 by default) and the `REJECTED` ones after `REJECTED_RETENTION_DAYS` (90 by default), at most once an hour and in batches of 2,000 records. Pending records are never deleted. It is active by default, so `flask cloud pending` shows fewer `SYNCED` records as time goes by (ADR-0012).
 
 - Settings `SYNCED_RETENTION_DAYS` and `REJECTED_RETENTION_DAYS`, both optional integers from 1 (ADR-0012).
 
 - The Edge authenticates in the cloud as an Edge Gateway, with the settings `CLOUD_DEVICE_ID` and `CLOUD_API_KEY` sent in the `X-API-Key` header, and reads the IoT devices the cloud assigns to it from `/edge-gateways/{deviceId}/iot-devices` (#20, ADR-0014).
 
-- Tracking (tracking): `POST /api/v1/devices/enroll` lets a node the cloud assigns to this Edge obtain its local API key. Development only (#20).
+- Sync (sync): `POST /api/v1/devices/enroll` lets a node the cloud assigns to this Edge obtain its local API key. Development only (#20).
 
 ### Changed
 
-- Tracking (tracking): the device registry caches every device the cloud sends for this Edge Gateway, also the ones not yet registered in the Edge (#20).
+- Sync (sync): the device registry caches every device the cloud sends for this Edge Gateway, also the ones not yet registered in the Edge (#20).
 
-- Sync (sync): new bounded context that owns the exchange with the cloud: the device registry, the copy of the profiles, the sending of the pending readings and actions, their deletion, the `flask cloud` commands and the enrollment of the nodes (`POST /api/v1/devices/enroll`). Tracking keeps the reception of the telemetry and the configuration it hands to each node, and no longer depends on the cloud. The routes, the commands, the settings and the database do not change; the loggers of the cloud gateways are now named `sync.infrastructure.*` (ADR-0015).
+- Sync (sync): new bounded context that owns the exchange with the cloud: the device registry, the copy of the profiles, the sending of the pending readings and actions, their deletion, the `flask cloud` commands and the enrollment of the nodes (`POST /api/v1/devices/enroll`). Tracking keeps the reception of the telemetry and the configuration it hands to each node, and no longer depends on the cloud. The routes, the commands, the settings and the database do not change; the loggers of the cloud gateways are now named `sync.infrastructure.*` (#23, ADR-0015).
 
 ### Removed
 
-- Settings `CLOUD_USERNAME` and `CLOUD_PASSWORD`: the Edge no longer signs in with the account of an operator (#20, ADR-0014 supersedes ADR-0005).
-
-- Setting `CLOUD_ENVIRONMENT_IDS`, added in #19 and never released: the cloud tells each Edge Gateway its devices, 15 at most, so the Edge no longer lists environments (ADR-0014 supersedes ADR-0013).
+- Settings `CLOUD_USERNAME` and `CLOUD_PASSWORD`: the Edge no longer signs in with the account of an operator. A station that updates from 0.2.0 with `CLOUD_SYNC_ENABLED=true` must set `CLOUD_DEVICE_ID` and `CLOUD_API_KEY` first, or the service does not start (#20, ADR-0014 supersedes ADR-0005).
 
 ## [0.2.0] - 2026-11-03
 
