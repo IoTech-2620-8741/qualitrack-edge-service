@@ -16,7 +16,7 @@ from flask import current_app
 from flask.cli import AppGroup
 
 from shared.infrastructure.cloud_session import CloudRequestError
-from tracking.application.errors import CloudSynchronizationDisabled
+from sync.application.errors import CloudSynchronizationDisabled
 
 cloud_cli = AppGroup("cloud", help="Synchronize the Edge with the QualiTrack cloud.")
 

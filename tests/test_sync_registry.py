@@ -5,12 +5,14 @@ from datetime import UTC, datetime, timedelta, timezone
 from app import create_app
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
-from tracking.application.errors import CloudSynchronizationDisabled
-from tracking.application.services import DeviceRegistryApplicationService
-from tracking.domain.entities import MonitoredDevice
-from tracking.domain.enums import DeviceStatus, DeviceType
-from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
-from tracking.infrastructure.repositories import MonitoredDeviceRepository
+from sync.application.errors import CloudSynchronizationDisabled
+from sync.application.services import DeviceRegistryApplicationService
+from sync.domain.entities import MonitoredDevice
+from sync.domain.enums import DeviceStatus
+from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
+from sync.infrastructure.repositories import MonitoredDeviceRepository
+from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
+from tracking.domain.enums import DeviceType
 
 NOW = datetime(2026, 11, 3, 12, 0, tzinfo=UTC)
 
@@ -94,7 +96,7 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
             equipment(id=19, sensorExternalId="ENV-009", status="RETIRED"),
         ]))
 
-        with self.assertLogs("tracking.infrastructure.cloud_registry_gateway", "WARNING") as logs:
+        with self.assertLogs("sync.infrastructure.cloud_registry_gateway", "WARNING") as logs:
             devices = CloudDeviceRegistryGateway(session).fetch_devices()
 
         self.assertIn("Skipped the cloud device ENV-009", logs.output[0])
@@ -145,6 +147,22 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
 
                 with self.assertRaises(CloudRejectedError):
                     CloudDeviceRegistryGateway(session).fetch_devices()
+
+
+class IamAntiCorruptionLayerTestCase(unittest.TestCase):
+    def test_reports_the_nodes_registered_in_this_edge_revoked_ones_included(self):
+        class FakeIamDevice:
+            def __init__(self, device_id, revoked):
+                self.device_id = device_id
+                self.revoked_at = NOW if revoked else None
+
+        class FakeIamAuthenticationService:
+            def list_devices(self):
+                return [FakeIamDevice("ENV-001", False), FakeIamDevice("CNT-009", True)]
+
+        layer = IamAntiCorruptionLayer(FakeIamAuthenticationService())
+
+        self.assertEqual(layer.registered_device_ids(), {"ENV-001", "CNT-009"})
 
 
 class FakeRegistryGateway:

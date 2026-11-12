@@ -1,24 +1,21 @@
 """Application services for the Tracking bounded context.
 
 Application services coordinate Tracking use cases: they authenticate nodes
-through the IAM anti-corruption layer, read the cloud through injected
-gateways, invoke domain behavior and persist the outcome through repositories.
+through the IAM anti-corruption layer, invoke domain behavior and persist the
+outcome through repositories.
 """
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from tracking.application.errors import (
-    CloudSynchronizationDisabled,
     ConfigurationNotAvailable,
     DeviceAuthenticationFailed,
     DeviceTypeNotAllowed,
 )
-from tracking.application.gateways import DeviceRegistryGateway
 from tracking.domain.entities import (
     ActuationEvent,
     EnvironmentalProfile,
-    MonitoredDevice,
     ReportingDevice,
     TelemetryReading,
 )
@@ -33,14 +30,12 @@ from tracking.domain.repositories import (
     ActuationEventRepository,
     ActuationEventSaveResult,
     EnvironmentalProfileRepository,
-    MonitoredDeviceRepository,
     TelemetryReadingRepository,
     TelemetryReadingSaveResult,
 )
 from tracking.infrastructure.repositories import (
     ActuationEventRepository as ActuationEventRepositoryImpl,
     EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
-    MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl,
     TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
 )
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
@@ -147,74 +142,6 @@ class TelemetryApplicationService:
         if reporting_device.device_type is not device_type:
             raise DeviceTypeNotAllowed
         return reporting_device
-
-
-@dataclass(frozen=True)
-class RegistrySynchronization:
-    """Outcome of one read of the cloud registry.
-
-    Attributes:
-        devices: Nodes of this Edge the cloud registers, now in the local copy.
-        not_in_cloud: Nodes registered in this Edge that the cloud does not
-            register as IoT devices with that ``sensorExternalId``; their
-            records wait until the cloud registers them.
-    """
-
-    devices: list[MonitoredDevice]
-    not_in_cloud: list[str]
-
-
-class DeviceRegistryApplicationService:
-    """Keep the local copy of the nodes of this Edge, as the cloud registers them.
-
-    The cloud is the source of truth of the registry, but the laboratory may
-    have nodes in environments other stations serve. The Edge keeps only the
-    nodes registered in it with ``flask devices register``, which IAM knows,
-    so it reads the profiles of its own nodes only. The local copy gives the
-    Edge the cloud identifiers it synchronizes telemetry to, and it stays
-    available while the cloud is unreachable.
-    """
-
-    def __init__(
-        self,
-        registry_gateway: DeviceRegistryGateway | None,
-        iam_anti_corruption_layer: IamAntiCorruptionLayer,
-        monitored_device_repository: MonitoredDeviceRepository | None = None,
-    ):
-        """Initialize the service; without a gateway the cloud synchronization is disabled."""
-        self.registry_gateway = registry_gateway
-        self.iam_anti_corruption_layer = iam_anti_corruption_layer
-        self.monitored_device_repository = (
-            monitored_device_repository or MonitoredDeviceRepositoryImpl()
-        )
-
-    def synchronize_registry(self) -> RegistrySynchronization:
-        """Replace the local copy with the nodes of this Edge the cloud registers now.
-
-        The local copy changes only when the cloud answers, so a failed
-        synchronization keeps the previous one.
-
-        Raises:
-            CloudSynchronizationDisabled: The Edge has no connection with the
-                cloud configured.
-            shared.infrastructure.cloud_session.CloudRequestError: The cloud
-                did not answer or rejected the request.
-        """
-        if self.registry_gateway is None:
-            raise CloudSynchronizationDisabled
-        registered = self.iam_anti_corruption_layer.registered_device_ids()
-        devices = [device for device in self.registry_gateway.fetch_devices() if device.device_id in registered]
-        self.monitored_device_repository.replace_all(devices)
-        in_cloud = {device.device_id for device in devices}
-        return RegistrySynchronization(devices, sorted(registered - in_cloud))
-
-    def monitored_devices(self) -> list[MonitoredDevice]:
-        """Return the local copy of the registry, ordered by identifier."""
-        return self.monitored_device_repository.find_all()
-
-    def find_monitored_device(self, device_id: str) -> MonitoredDevice | None:
-        """Return the cloud registration of one node, if the cloud registers it."""
-        return self.monitored_device_repository.find_by_device_id(device_id)
 
 
 @dataclass(frozen=True)
