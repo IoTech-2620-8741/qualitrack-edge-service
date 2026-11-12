@@ -28,7 +28,11 @@ from iam.interfaces.services import iam_api
 from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, db, init_db
-from sync.application.services import TelemetrySynchronizationApplicationService
+from sync.application.services import (
+    ProfileSynchronizationApplicationService,
+    TelemetrySynchronizationApplicationService,
+)
+from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
 from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from sync.interfaces.cli import cloud_cli
 from tracking.application.services import (
@@ -36,7 +40,6 @@ from tracking.application.services import (
     EnvironmentalProfileApplicationService,
     TelemetryApplicationService,
 )
-from tracking.infrastructure.cloud_profile_gateway import CloudProfileGateway
 from tracking.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 from tracking.interfaces.services import tracking_api
@@ -70,9 +73,8 @@ def create_app() -> Flask:
         profile_gateway = CloudProfileGateway(cloud_session)
         telemetry_gateway = CloudTelemetryGateway(cloud_session)
     device_registry_service = DeviceRegistryApplicationService(registry_gateway, iam_anti_corruption_layer)
-    environmental_profile_service = EnvironmentalProfileApplicationService(
-        profile_gateway, iam_anti_corruption_layer
-    )
+    environmental_profile_service = EnvironmentalProfileApplicationService(iam_anti_corruption_layer)
+    profile_synchronization_service = ProfileSynchronizationApplicationService(profile_gateway)
     telemetry_synchronization_service = TelemetrySynchronizationApplicationService(
         telemetry_gateway,
         synced_retention=timedelta(days=app.config["SYNCED_RETENTION_DAYS"]),
@@ -80,6 +82,7 @@ def create_app() -> Flask:
     )
     app.extensions["device_registry_service"] = device_registry_service
     app.extensions["environmental_profile_service"] = environmental_profile_service
+    app.extensions["profile_synchronization_service"] = profile_synchronization_service
     app.extensions["telemetry_synchronization_service"] = telemetry_synchronization_service
     if registry_gateway is not None:
         # The registry goes first: it gives the cloud route of each node.
@@ -87,7 +90,7 @@ def create_app() -> Flask:
             app.config["CLOUD_SYNC_INTERVAL_SECONDS"],
             [
                 ("device registry", device_registry_service.synchronize_registry),
-                ("environmental profiles", environmental_profile_service.synchronize_profiles),
+                ("environmental profiles", profile_synchronization_service.synchronize_profiles),
                 ("pending telemetry", telemetry_synchronization_service.synchronize_pending),
                 ("telemetry purge", telemetry_synchronization_service.purge),
             ],

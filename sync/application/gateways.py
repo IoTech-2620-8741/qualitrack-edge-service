@@ -5,8 +5,16 @@ implementations into the services.
 """
 from typing import Protocol
 
-from tracking.domain.entities import ActuationEvent, MonitoredDevice, TelemetryReading
+from tracking.domain.entities import ActuationEvent, EnvironmentalProfile, MonitoredDevice, TelemetryReading
 from tracking.domain.enums import SyncStatus
+
+
+class ProfileGateway(Protocol):
+    """Source of the environmental profile each node applies."""
+
+    def fetch_profile(self, device: MonitoredDevice) -> EnvironmentalProfile | None:
+        """Read the profile of a node, or ``None`` when the cloud has none yet."""
+        ...
 
 
 class TelemetryGateway(Protocol):
