@@ -44,10 +44,10 @@ class RegistrySynchronization:
     """Outcome of one read of the cloud registry.
 
     Attributes:
-        devices: Nodes of this Edge the cloud registers, now in the local copy.
+        devices: IoT devices the cloud assigns to this Edge Gateway, now in the
+            local copy, also the ones not yet registered in the Edge.
         not_in_cloud: Nodes registered in this Edge that the cloud does not
-            register as IoT devices with that ``sensorExternalId``; their
-            records wait until the cloud registers them.
+            assign to this Edge Gateway; their records wait until it does.
     """
 
     devices: list[MonitoredDevice]
@@ -55,14 +55,14 @@ class RegistrySynchronization:
 
 
 class DeviceRegistryApplicationService:
-    """Keep the local copy of the nodes of this Edge, as the cloud registers them.
+    """Keep the local copy of the IoT devices the cloud assigns to this Edge Gateway.
 
-    The cloud is the source of truth of the registry, but the laboratory may
-    have nodes in environments other stations serve. The Edge keeps only the
-    nodes registered in it with ``flask devices register``, which IAM knows,
-    so it reads the profiles of its own nodes only. The local copy gives the
-    Edge the cloud identifiers it synchronizes telemetry to, and it stays
-    available while the cloud is unreachable.
+    The cloud is the source of truth of the registry and decides which devices
+    this Edge Gateway serves: up to 15 of its environment (ADR-0014). The Edge
+    caches every one of them, also before they are registered in its IAM, so a
+    node can enroll when the cached registry authorizes it. The local copy
+    gives the Edge the cloud identifiers it synchronizes telemetry to, and it
+    stays available while the cloud is unreachable.
     """
 
     def __init__(
