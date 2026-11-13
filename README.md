@@ -20,7 +20,8 @@ The QualiTrack nodes are:
     `device_id` and `X-API-Key` at `POST /api/v1/auth/sign-in` (TS53, TS54)
   - `flask devices` commands to register the nodes with a random API key,
     rotate their key, revoke them and list them
-  - API keys stored as salted PBKDF2 verifiers
+  - API keys stored as SHA-256 verifiers; a key stored before with PBKDF2
+    keeps working until it is rotated (ADR-0016)
   - optional registration of a development test node
   - enrollment of a node the cloud assigns to this Edge at
     `POST /api/v1/devices/enroll`, in development only

@@ -22,9 +22,9 @@ package "IAM Bounded Context" #FFEBDE {
     }
 
     class ApiCredential {
-      -_salt: bytes
       -_digest: bytes
-      -_iterations: int
+      -_salt: bytes | None
+      -_iterations: int | None
       +generate_secret(): str
       +create(secret): ApiCredential
       +from_encoded(encoded): ApiCredential
