@@ -40,6 +40,7 @@ package "IAM Bounded Context" #FFEBDE {
     interface "DeviceRepository\n<<Protocol>>" as IDeviceRepository {
       +find_by_device_id(device_id): Device | None
       +find_all(): list[Device]
+      +add(device): Device
       +save(device): Device
       +get_or_create_test_device(device_id, api_key, device_type): Device
     }

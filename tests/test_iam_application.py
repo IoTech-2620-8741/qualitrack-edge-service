@@ -3,6 +3,7 @@ import unittest
 from iam.application.services import AuthApplicationService
 from iam.domain.entities import Device
 from iam.domain.enums import DeviceType
+from iam.domain.errors import DeviceAlreadyRegistered
 
 
 class InMemoryDeviceRepository:
@@ -14,6 +15,12 @@ class InMemoryDeviceRepository:
 
     def find_all(self):
         return [self.devices[device_id] for device_id in sorted(self.devices)]
+
+    def add(self, device: Device):
+        if device.device_id in self.devices:
+            raise DeviceAlreadyRegistered
+        self.devices[device.device_id] = device
+        return device
 
     def save(self, device: Device):
         self.devices[device.device_id] = device

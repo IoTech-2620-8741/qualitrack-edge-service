@@ -2,6 +2,8 @@
 
 from iam.application.services import AuthApplicationService
 from iam.domain.enums import DeviceType as IamDeviceType
+from iam.domain.errors import DeviceAlreadyRegistered
+from sync.application.errors import DeviceAlreadyEnrolled
 from tracking.domain.enums import DeviceType
 
 
@@ -30,10 +32,16 @@ class IamAntiCorruptionLayer:
 
         Returns:
             The newly generated API key, available only once.
+
+        Raises:
+            DeviceAlreadyEnrolled: IAM already registers the device.
         """
-        issued = self._iam_authentication_service.register_device(
-            device_id,
-            IamDeviceType(device_type.value),
-        )
+        try:
+            issued = self._iam_authentication_service.register_device(
+                device_id,
+                IamDeviceType(device_type.value),
+            )
+        except DeviceAlreadyRegistered as error:
+            raise DeviceAlreadyEnrolled from error
 
         return issued.api_key

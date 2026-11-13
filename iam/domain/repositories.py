@@ -17,6 +17,15 @@ class DeviceRepository(Protocol):
         """Load every registered device aggregate, ordered by identity."""
         ...
 
+    def add(self, device: Device) -> Device:
+        """Persist a new device aggregate.
+
+        Raises:
+            DeviceAlreadyRegistered: A device with this identity exists, also
+                when another request registered it at the same time.
+        """
+        ...
+
     def save(self, device: Device) -> Device:
         """Persist a device aggregate's current state."""
         ...

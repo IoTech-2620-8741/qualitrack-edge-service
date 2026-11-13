@@ -147,15 +147,10 @@ class DeviceRegistryApplicationService:
         if device_id in registered:
             raise DeviceAlreadyEnrolled
 
-        try:
-            return self.iam_anti_corruption_layer.enroll_device(
-                device_id,
-                device_type,
-            )
-        except ValueError as error:
-            if str(error) == "Device is already registered":
-                raise DeviceAlreadyEnrolled from error
-            raise
+        return self.iam_anti_corruption_layer.enroll_device(
+            device_id,
+            device_type,
+        )
 
 
 @dataclass(frozen=True)
