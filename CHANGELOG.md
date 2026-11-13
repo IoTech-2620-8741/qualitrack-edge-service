@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sync (sync): the pending readings and actions are sent four at a time instead of one by one, so the Edge keeps up with 15 nodes when the cloud is slow; an outage still stops the synchronization once the records in flight are answered. The records of nodes the registry does not place in an environment are filtered and counted in SQL instead of being read on every cycle.
+- Shared (shared): the background synchronization logs how long each cycle and each task took, and warns when a cycle takes longer than `CLOUD_SYNC_INTERVAL_SECONDS`.
+- IAM (iam): new API keys are kept as a SHA-256 verifier instead of PBKDF2, so checking the key of a node no longer takes tens of milliseconds of the Raspberry Pi on every request. Verifiers stored before keep working; `flask devices rotate-key` replaces them (ADR-0016).
+- Sync (sync): `DeviceRegistryApplicationService` requires its repository from `create_app`, as the other Sync services do (ADR-0015).
+
+### Fixed
+
+- IAM (iam): two registrations of the same node at the same time, for example `flask devices register` and `POST /api/v1/devices/enroll`, no longer both answer "Registered" with only the last key working; the second one fails with "already registered".
+- Sync (sync): the profile read from the cloud is parsed once.
+
+### Removed
+
+- `DeviceRegistryApplicationService.find_monitored_device` and `AuthApplicationService.authenticate`, which only the tests used.
+
 ## [0.3.1] - 2026-11-13
 
 ### Changed
