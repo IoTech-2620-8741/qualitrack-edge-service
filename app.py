@@ -36,12 +36,18 @@ from sync.application.services import (
 from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
 from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
 from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
+from sync.infrastructure.repositories import MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl
 from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer as SyncIamAntiCorruptionLayer
 from sync.interfaces.cli import cloud_cli
 from sync.interfaces.services import sync_api
 from tracking.application.services import (
     EnvironmentalProfileApplicationService,
     TelemetryApplicationService,
+)
+from tracking.infrastructure.repositories import (
+    ActuationEventRepository as ActuationEventRepositoryImpl,
+    EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
+    TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
 )
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 from tracking.interfaces.services import tracking_api
@@ -75,13 +81,21 @@ def create_app() -> Flask:
         registry_gateway = CloudDeviceRegistryGateway(cloud_session)
         profile_gateway = CloudProfileGateway(cloud_session)
         telemetry_gateway = CloudTelemetryGateway(cloud_session)
+    # Sync is a conformist of Tracking (ADR-0015): it receives the repositories
+    # of Tracking from here instead of building the implementations of another context.
+    monitored_device_repository = MonitoredDeviceRepositoryImpl()
     device_registry_service = DeviceRegistryApplicationService(
-        registry_gateway, SyncIamAntiCorruptionLayer(iam_authentication_service)
+        registry_gateway, SyncIamAntiCorruptionLayer(iam_authentication_service), monitored_device_repository
     )
     environmental_profile_service = EnvironmentalProfileApplicationService(iam_anti_corruption_layer)
-    profile_synchronization_service = ProfileSynchronizationApplicationService(profile_gateway)
+    profile_synchronization_service = ProfileSynchronizationApplicationService(
+        profile_gateway, monitored_device_repository, EnvironmentalProfileRepositoryImpl()
+    )
     telemetry_synchronization_service = TelemetrySynchronizationApplicationService(
         telemetry_gateway,
+        monitored_device_repository,
+        TelemetryReadingRepositoryImpl(),
+        ActuationEventRepositoryImpl(),
         synced_retention=timedelta(days=app.config["SYNCED_RETENTION_DAYS"]),
         rejected_retention=timedelta(days=app.config["REJECTED_RETENTION_DAYS"]),
     )

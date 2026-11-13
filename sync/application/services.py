@@ -29,11 +29,6 @@ from tracking.domain.repositories import (
     EnvironmentalProfileRepository,
     TelemetryReadingRepository,
 )
-from tracking.infrastructure.repositories import (
-    ActuationEventRepository as ActuationEventRepositoryImpl,
-    EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
-    TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
-)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -196,24 +191,25 @@ class TelemetrySynchronizationApplicationService:
     def __init__(
         self,
         telemetry_gateway: TelemetryGateway | None,
-        monitored_device_repository: MonitoredDeviceRepository | None = None,
-        telemetry_reading_repository: TelemetryReadingRepository | None = None,
-        actuation_event_repository: ActuationEventRepository | None = None,
+        monitored_device_repository: MonitoredDeviceRepository,
+        telemetry_reading_repository: TelemetryReadingRepository,
+        actuation_event_repository: ActuationEventRepository,
         batch_size: int = 100,
         synced_retention: timedelta = timedelta(days=7),
         rejected_retention: timedelta = timedelta(days=90),
         clock: Callable[[], datetime] | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
-        """Initialize the service; without a gateway the cloud synchronization is disabled."""
+        """Initialize the service; without a gateway the cloud synchronization is disabled.
+
+        Sync is a conformist of Tracking (ADR-0015): it receives the repository
+        contracts of Tracking, which ``create_app`` builds, instead of creating
+        the implementations of another context.
+        """
         self.telemetry_gateway = telemetry_gateway
-        self.monitored_device_repository = (
-            monitored_device_repository or MonitoredDeviceRepositoryImpl()
-        )
-        self.telemetry_reading_repository = (
-            telemetry_reading_repository or TelemetryReadingRepositoryImpl()
-        )
-        self.actuation_event_repository = actuation_event_repository or ActuationEventRepositoryImpl()
+        self.monitored_device_repository = monitored_device_repository
+        self.telemetry_reading_repository = telemetry_reading_repository
+        self.actuation_event_repository = actuation_event_repository
         self.batch_size = batch_size
         self.synced_retention = synced_retention
         self.rejected_retention = rejected_retention
@@ -317,17 +313,17 @@ class ProfileSynchronizationApplicationService:
     def __init__(
         self,
         profile_gateway: ProfileGateway | None,
-        monitored_device_repository: MonitoredDeviceRepository | None = None,
-        environmental_profile_repository: EnvironmentalProfileRepository | None = None,
+        monitored_device_repository: MonitoredDeviceRepository,
+        environmental_profile_repository: EnvironmentalProfileRepository,
     ):
-        """Initialize the service; without a gateway the cloud synchronization is disabled."""
+        """Initialize the service; without a gateway the cloud synchronization is disabled.
+
+        The copy of the profiles belongs to Tracking, which hands it to the
+        nodes; ``create_app`` builds its repository (ADR-0015).
+        """
         self.profile_gateway = profile_gateway
-        self.monitored_device_repository = (
-            monitored_device_repository or MonitoredDeviceRepositoryImpl()
-        )
-        self.environmental_profile_repository = (
-            environmental_profile_repository or EnvironmentalProfileRepositoryImpl()
-        )
+        self.monitored_device_repository = monitored_device_repository
+        self.environmental_profile_repository = environmental_profile_repository
 
     def synchronize_profiles(self) -> list[EnvironmentalProfile]:
         """Copy the profile of every node the registry places in an environment.
