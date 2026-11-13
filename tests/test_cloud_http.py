@@ -17,7 +17,11 @@ from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from sync.infrastructure.repositories import MonitoredDeviceRepository
 from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
-from tracking.infrastructure.repositories import EnvironmentalProfileRepository
+from tracking.infrastructure.repositories import (
+    ActuationEventRepository,
+    EnvironmentalProfileRepository,
+    TelemetryReadingRepository,
+)
 
 _GATEWAY = "/api/v1/edge-gateways/EDGE-001"
 _REGISTRY = f"{_GATEWAY}/iot-devices"
@@ -148,12 +152,14 @@ class CloudOverHttpTestCase(unittest.TestCase):
             self.assertEqual(sent.status_code, 201)
         session = CloudSession(self.base_url, "EDGE-001", "gateway-secret")
         layer = self.layer()
+        devices = MonitoredDeviceRepository()
         services = {
-            "device_registry_service": DeviceRegistryApplicationService(CloudDeviceRegistryGateway(session), layer),
+            "device_registry_service": DeviceRegistryApplicationService(
+                CloudDeviceRegistryGateway(session), layer, devices),
             "profile_synchronization_service": ProfileSynchronizationApplicationService(
-                CloudProfileGateway(session)),
+                CloudProfileGateway(session), devices, EnvironmentalProfileRepository()),
             "telemetry_synchronization_service": TelemetrySynchronizationApplicationService(
-                CloudTelemetryGateway(session)),
+                CloudTelemetryGateway(session), devices, TelemetryReadingRepository(), ActuationEventRepository()),
         }
         previous = {name: self.app.extensions[name] for name in services}
         self.app.extensions.update(services)

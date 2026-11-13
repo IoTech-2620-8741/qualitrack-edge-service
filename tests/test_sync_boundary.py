@@ -15,6 +15,18 @@ class ContextDependencyTestCase(unittest.TestCase):
 
         self.assertEqual(dependent, [])
 
+    def test_sync_uses_the_model_of_tracking_but_not_its_infrastructure(self):
+        sync = Path(__file__).resolve().parent.parent / "sync"
+
+        dependent = [
+            str(module.relative_to(sync.parent))
+            for module in sorted(sync.rglob("*.py"))
+            if re.search(r"^\s*(from|import)\s+tracking\.(infrastructure|interfaces)\b",
+                         module.read_text(), re.MULTILINE)
+        ]
+
+        self.assertEqual(dependent, [])
+
 
 if __name__ == "__main__":
     unittest.main()
