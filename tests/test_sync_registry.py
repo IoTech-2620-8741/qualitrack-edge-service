@@ -1,6 +1,7 @@
 import threading
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import patch
 
 from app import create_app
 from iam.infrastructure.models import Device as DeviceModel
@@ -299,6 +300,15 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
 
         self.assertIs(results["first"], failure)
         self.assertEqual(results["second"], 3)
+
+    def test_logs_how_long_the_cycle_took_and_warns_when_it_exceeds_the_interval(self):
+        clock = iter([0.0, 0.0, 0.5, 0.5, 2.5, 2.5])
+        with patch("shared.infrastructure.cloud_sync_scheduler.time.monotonic", lambda: next(clock)), \
+                self.assertLogs("shared.infrastructure.cloud_sync_scheduler", "INFO") as logs:
+            CloudSyncScheduler(1, [("registry", lambda: None), ("telemetry", lambda: None)]).run_once()
+
+        self.assertEqual(logs.records[-1].levelname, "WARNING")
+        self.assertIn("cycle took 2.5 s (registry 0.5 s, telemetry 2.0 s)", logs.output[-1])
 
     def test_background_thread_runs_until_stopped(self):
         ran = threading.Event()
