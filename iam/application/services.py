@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from iam.domain.credentials import ApiCredential
 from iam.domain.entities import Device
 from iam.domain.enums import DeviceType
+from iam.domain.errors import DeviceAlreadyRegistered
 from iam.domain.repositories import DeviceRepository
 from iam.infrastructure.repositories import DeviceRepository as PeeweeDeviceRepository
 
@@ -43,21 +44,18 @@ class AuthApplicationService:
             return None
         return device
 
-    def authenticate(self, device_id: str, api_key: str) -> bool:
-        """Check credentials against the identified device's access state."""
-        return self.authenticated_device(device_id, api_key) is not None
-
     def register_device(self, device_id: str, device_type: DeviceType) -> IssuedApiKey:
         """Register a device with a new random API key.
 
         Raises:
-            ValueError: A device with this identity is already registered, or
-                the domain rejects the identity.
+            DeviceAlreadyRegistered: A device with this identity is already
+                registered, also by a request that ran at the same time.
+            ValueError: The domain rejects the identity.
         """
         if self.device_repository.find_by_device_id(device_id) is not None:
-            raise ValueError("Device is already registered")
+            raise DeviceAlreadyRegistered
         api_key = ApiCredential.generate_secret()
-        device = self.device_repository.save(
+        device = self.device_repository.add(
             Device.register(device_id, api_key, device_type)
         )
         return IssuedApiKey(device, api_key)

@@ -3,6 +3,7 @@ import unittest
 from iam.application.services import AuthApplicationService
 from iam.domain.entities import Device
 from iam.domain.enums import DeviceType
+from iam.domain.errors import DeviceAlreadyRegistered
 
 
 class InMemoryDeviceRepository:
@@ -14,6 +15,12 @@ class InMemoryDeviceRepository:
 
     def find_all(self):
         return [self.devices[device_id] for device_id in sorted(self.devices)]
+
+    def add(self, device: Device):
+        if device.device_id in self.devices:
+            raise DeviceAlreadyRegistered
+        self.devices[device.device_id] = device
+        return device
 
     def save(self, device: Device):
         self.devices[device.device_id] = device
@@ -51,8 +58,8 @@ class AuthApplicationServiceTestCase(unittest.TestCase):
         issued = self.service.register_device("CNT-001", DeviceType.CONTAINER_MONITOR)
         rotated = self.service.rotate_api_key("CNT-001")
 
-        self.assertFalse(self.service.authenticate("CNT-001", issued.api_key))
-        self.assertTrue(self.service.authenticate("CNT-001", rotated.api_key))
+        self.assertIsNone(self.service.authenticated_device("CNT-001", issued.api_key))
+        self.assertIsNotNone(self.service.authenticated_device("CNT-001", rotated.api_key))
 
         self.service.revoke_device("CNT-001")
         self.assertIsNone(self.service.authenticated_device("CNT-001", rotated.api_key))

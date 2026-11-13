@@ -7,6 +7,7 @@ Deployments run a single worker process, as SQLite expects.
 """
 import logging
 import threading
+import time
 from collections.abc import Callable
 
 from shared.infrastructure.cloud_session import CloudRequestError
@@ -29,11 +30,17 @@ class CloudSyncScheduler:
     def run_once(self) -> dict[str, object]:
         """Run every task with its own database connection.
 
+        The time of each task and of the whole cycle is logged, so a cycle
+        that takes longer than the interval shows that the Edge falls behind.
+
         Returns:
             The result of each task by name, or the exception it raised.
         """
         results: dict[str, object] = {}
+        cycle_started = time.monotonic()
+        durations = []
         for name, task in self._tasks:
+            task_started = time.monotonic()
             try:
                 with db.connection_context():
                     results[name] = task()
@@ -43,6 +50,10 @@ class CloudSyncScheduler:
             except Exception as error:  # noqa: BLE001 - the thread must survive any task failure
                 LOGGER.exception("Cloud synchronization of %s failed", name)
                 results[name] = error
+            durations.append(f"{name} {time.monotonic() - task_started:.1f} s")
+        elapsed = time.monotonic() - cycle_started
+        log = LOGGER.warning if elapsed > self._interval_seconds else LOGGER.info
+        log("Cloud synchronization cycle took %.1f s (%s)", elapsed, ", ".join(durations))
         return results
 
     def start(self) -> None:

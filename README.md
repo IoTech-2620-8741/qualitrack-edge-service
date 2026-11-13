@@ -20,7 +20,8 @@ The QualiTrack nodes are:
     `device_id` and `X-API-Key` at `POST /api/v1/auth/sign-in` (TS53, TS54)
   - `flask devices` commands to register the nodes with a random API key,
     rotate their key, revoke them and list them
-  - API keys stored as salted PBKDF2 verifiers
+  - API keys stored as SHA-256 verifiers; a key stored before with PBKDF2
+    keeps working until it is rotated (ADR-0016)
   - optional registration of a development test node
   - enrollment of a node the cloud assigns to this Edge at
     `POST /api/v1/devices/enroll`, in development only
@@ -259,17 +260,17 @@ flask --app app cloud profiles
    profile in the cloud has none in the Edge. The copy changes only when every
    profile was read, so the nodes keep the last one while the cloud is
    unreachable. `cloud profiles` lists it.
-3. It sends the pending readings and actions, oldest first, to the cloud route
-   of their node (`/edge-gateways/{deviceId}/iot-devices/{id}/telemetry-measurements`,
+3. It sends the pending readings and actions, oldest first and four at a
+   time, to the cloud route of their node (`/edge-gateways/{deviceId}/iot-devices/{id}/telemetry-measurements`,
    and `.../actuation-events` for the actions of a container monitor).
    - `201` or `200` (the cloud already had it): the record becomes `SYNCED`.
    - `400`, `404`, `409` or `422`: the cloud refuses it for good, so it becomes
      `REJECTED` and the reason is logged.
    - A node the registry does not place in an environment yet: its records
-     stay `PENDING` until it is.
+     stay `PENDING` until it is; they are counted, not read.
    - Cloud not reachable, a server error or a rejected API key: the
-     synchronization stops, the records keep their state and the next cycle
-     retries them.
+     synchronization stops once the four records in flight are answered, the
+     records keep their state and the next cycle retries them.
 4. It deletes the records that became `SYNCED` more than
    `SYNCED_RETENTION_DAYS` ago and the `REJECTED` ones older than
    `REJECTED_RETENTION_DAYS`, counted from the moment the Edge received them.

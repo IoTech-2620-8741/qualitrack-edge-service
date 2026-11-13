@@ -93,7 +93,7 @@ class IamApiTestCase(unittest.TestCase):
             stored = DeviceModel.get_by_id("ENV-001")
 
         self.assertNotEqual(stored.credential_verifier, "test-only-key")
-        self.assertTrue(stored.credential_verifier.startswith("pbkdf2_sha256$"))
+        self.assertTrue(stored.credential_verifier.startswith("sha256$"))
         self.assertEqual(stored.device_type, "ENVIRONMENTAL_DEVICE")
 
 

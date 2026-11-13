@@ -8,6 +8,7 @@ answered long ago.
 import logging
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -20,7 +21,6 @@ from sync.application.gateways import DeviceRegistryGateway, ProfileGateway, Tel
 from sync.domain.entities import MonitoredDevice
 from sync.domain.enums import DeviceStatus
 from sync.domain.repositories import MonitoredDeviceRepository
-from sync.infrastructure.repositories import MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl
 from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 from tracking.domain.entities import EnvironmentalProfile
 from tracking.domain.enums import DeviceType, SyncStatus
@@ -37,6 +37,11 @@ LOGGER = logging.getLogger(__name__)
 PURGE_BATCH_SIZE = 2000
 PURGE_PAUSE_SECONDS = 0.05
 PURGE_INTERVAL = timedelta(hours=1)
+
+# Records are sent this many at a time: the cloud answers a repeated record
+# with 200, so sending in parallel is safe, and an outage costs at most one
+# window of timeouts before the synchronization stops.
+SEND_WORKERS = 4
 
 
 @dataclass(frozen=True)
@@ -69,14 +74,15 @@ class DeviceRegistryApplicationService:
         self,
         registry_gateway: DeviceRegistryGateway | None,
         iam_anti_corruption_layer: IamAntiCorruptionLayer,
-        monitored_device_repository: MonitoredDeviceRepository | None = None,
+        monitored_device_repository: MonitoredDeviceRepository,
     ):
-        """Initialize the service; without a gateway the cloud synchronization is disabled."""
+        """Initialize the service; without a gateway the cloud synchronization is disabled.
+
+        ``create_app`` builds the repository (ADR-0015).
+        """
         self.registry_gateway = registry_gateway
         self.iam_anti_corruption_layer = iam_anti_corruption_layer
-        self.monitored_device_repository = (
-            monitored_device_repository or MonitoredDeviceRepositoryImpl()
-        )
+        self.monitored_device_repository = monitored_device_repository
 
     def synchronize_registry(self) -> RegistrySynchronization:
         """Synchronize all IoT devices assigned to this Edge Gateway.
@@ -104,10 +110,6 @@ class DeviceRegistryApplicationService:
     def monitored_devices(self) -> list[MonitoredDevice]:
         """Return the local copy of the registry, ordered by identifier."""
         return self.monitored_device_repository.find_all()
-
-    def find_monitored_device(self, device_id: str) -> MonitoredDevice | None:
-        """Return the cloud registration of one node, if the cloud registers it."""
-        return self.monitored_device_repository.find_by_device_id(device_id)
 
     def enroll_device(
         self,
@@ -151,15 +153,10 @@ class DeviceRegistryApplicationService:
         if device_id in registered:
             raise DeviceAlreadyEnrolled
 
-        try:
-            return self.iam_anti_corruption_layer.enroll_device(
-                device_id,
-                device_type,
-            )
-        except ValueError as error:
-            if str(error) == "Device is already registered":
-                raise DeviceAlreadyEnrolled from error
-            raise
+        return self.iam_anti_corruption_layer.enroll_device(
+            device_id,
+            device_type,
+        )
 
 
 @dataclass(frozen=True)
@@ -181,11 +178,12 @@ class SynchronizationSummary:
 class TelemetrySynchronizationApplicationService:
     """Send the pending readings and actions to the cloud
 
-    Records are sent oldest first, each to the cloud route of its node, which
-    the local copy of the cloud registry provides. A record whose node the
-    registry does not place in an environment waits for a later
-    synchronization. When the cloud cannot answer, the synchronization stops
-    and the remaining records stay pending for the next cycle.
+    Records are sent oldest first, ``SEND_WORKERS`` at a time, each to the
+    cloud route of its node, which the local copy of the cloud registry
+    provides. A record whose node the registry does not place in an
+    environment is not read: it waits for a later synchronization and is only
+    counted. When the cloud cannot answer, the synchronization stops after the
+    current window and the remaining records stay pending for the next cycle.
     """
 
     def __init__(
@@ -284,21 +282,31 @@ class TelemetrySynchronizationApplicationService:
             self.sleep(PURGE_PAUSE_SECONDS)
 
     def _synchronize(self, repository, devices: dict[str, MonitoredDevice], send) -> SynchronizationSummary:
-        synced = rejected = waiting = 0
+        placed = sorted(device_id for device_id, device in devices.items() if device.is_in_environment)
+        waiting = repository.count_pending_outside(placed)
+        synced = rejected = 0
         last_id = 0
-        while records := repository.find_pending(last_id, self.batch_size):
-            for record in records:
-                last_id = record.id
-                device = devices.get(record.device_id)
-                if device is None or not device.is_in_environment:
-                    waiting += 1
-                    continue
-                answer = send(device, record)
-                repository.save_sync_status(record.synchronized(answer))
-                if answer is SyncStatus.SYNCED:
-                    synced += 1
-                else:
-                    rejected += 1
+        with ThreadPoolExecutor(max_workers=SEND_WORKERS, thread_name_prefix="cloud-send") as pool:
+            while records := repository.find_pending(last_id, self.batch_size, placed):
+                last_id = records[-1].id
+                for start in range(0, len(records), SEND_WORKERS):
+                    window = records[start:start + SEND_WORKERS]
+                    futures = [pool.submit(send, devices[record.device_id], record) for record in window]
+                    failure = None
+                    # The answers are saved in this thread, the one with the database connection.
+                    for record, future in zip(window, futures):
+                        try:
+                            answer = future.result()
+                        except Exception as error:  # noqa: BLE001 - re-raised once the window is saved
+                            failure = failure or error
+                            continue
+                        repository.save_sync_status(record.synchronized(answer))
+                        if answer is SyncStatus.SYNCED:
+                            synced += 1
+                        else:
+                            rejected += 1
+                    if failure is not None:
+                        raise failure
         return SynchronizationSummary(synced, rejected, waiting)
 
 

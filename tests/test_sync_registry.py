@@ -1,6 +1,7 @@
 import threading
 import unittest
 from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import patch
 
 from app import create_app
 from iam.infrastructure.models import Device as DeviceModel
@@ -218,9 +219,10 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
         self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001", "ENV-001"])
 
         service.synchronize_registry()
-        self.assertIsNone(service.find_monitored_device("ENV-001"))
-        self.assertEqual(service.find_monitored_device("CNT-001").environment_id, 3)
-        self.assertEqual(service.find_monitored_device("CNT-001").synced_at, NOW)
+        (container,) = service.monitored_devices()
+        self.assertEqual(container.device_id, "CNT-001")
+        self.assertEqual(container.environment_id, 3)
+        self.assertEqual(container.synced_at, NOW)
 
         with self.assertRaises(CloudUnavailableError):
             service.synchronize_registry()
@@ -248,7 +250,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
 
         self.assertEqual([d.device_id for d in service.monitored_devices()],["CNT-001", "CNT-OTHER", "ENV-001"])
 
-        self.assertIsNotNone(service.find_monitored_device("CNT-OTHER"))
+
 
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
@@ -298,6 +300,15 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
 
         self.assertIs(results["first"], failure)
         self.assertEqual(results["second"], 3)
+
+    def test_logs_how_long_the_cycle_took_and_warns_when_it_exceeds_the_interval(self):
+        clock = iter([0.0, 0.0, 0.5, 0.5, 2.5, 2.5])
+        with patch("shared.infrastructure.cloud_sync_scheduler.time.monotonic", lambda: next(clock)), \
+                self.assertLogs("shared.infrastructure.cloud_sync_scheduler", "INFO") as logs:
+            CloudSyncScheduler(1, [("registry", lambda: None), ("telemetry", lambda: None)]).run_once()
+
+        self.assertEqual(logs.records[-1].levelname, "WARNING")
+        self.assertIn("cycle took 2.5 s (registry 0.5 s, telemetry 2.0 s)", logs.output[-1])
 
     def test_background_thread_runs_until_stopped(self):
         ran = threading.Event()

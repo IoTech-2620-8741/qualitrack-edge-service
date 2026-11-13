@@ -96,6 +96,7 @@ on them.
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
+- **Amended by**: ADR-0016, which keeps a SHA-256 verifier instead of PBKDF2
 
 ### Context
 
@@ -573,3 +574,46 @@ do not change.
 - Moving the cloud registry to IAM, which ADR-0006 already rejected.
 - Evaluating the thresholds in the Edge, which the report leaves to the cloud
   and to the nodes (ADR-0001).
+
+## ADR-0016: Verify the API keys of the nodes with SHA-256
+
+- **Status**: Accepted
+- **Date**: 2026-11-13
+- **Amends**: ADR-0003
+
+### Context
+
+The Edge checks the API key of a node on every reading, action and
+configuration request (ADR-0003). It kept a PBKDF2 verifier with 310,000
+iterations, which costs about 50 ms on a desktop computer and several times
+more on the Raspberry Pi. With 15 nodes sending every 10 seconds
+(ADR-0012) that is a constant load on the four Gunicorn threads, and anyone on
+the local network who knows a `device_id` can call `POST /api/v1/auth/sign-in`
+in a loop to keep them busy. A slow, salted hash protects secrets that can be
+guessed; the Edge generates every key with 256 random bits
+(`flask devices register`, `rotate-key` and the enrollment).
+
+### Decision
+
+New verifiers are the SHA-256 digest of the key, stored as `sha256$<digest>`
+and compared in constant time. A verifier stored before as
+`pbkdf2_sha256$...` is still read and accepted, so no node has to be
+registered again; `flask devices rotate-key` replaces it with a SHA-256 one.
+
+### Consequences
+
+- Checking a key costs microseconds, so the requests of the nodes and the
+  sign-in no longer compete for the CPU of the Raspberry Pi.
+- The development `TEST_DEVICE_API_KEY` is chosen by hand and gets no
+  stretching; it must stay out of production, as the configuration already
+  requires.
+- Nodes registered before keep the PBKDF2 cost until their key is rotated.
+
+### Alternatives considered
+
+- Fewer PBKDF2 iterations, which keeps a cost that buys nothing for random
+  keys.
+- Rate limiting the sign-in, which needs shared state between the Gunicorn
+  threads and does not lower the cost of the legitimate requests.
+- Upgrading the verifier on the next successful sign-in, which writes to the
+  database in the authentication path.

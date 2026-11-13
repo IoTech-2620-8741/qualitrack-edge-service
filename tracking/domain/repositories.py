@@ -1,5 +1,6 @@
 """Repository abstractions for the Tracking bounded context."""
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -55,8 +56,12 @@ class TelemetryReadingRepository(Protocol):
         """
         ...
 
-    def find_pending(self, after_id: int, limit: int) -> list[TelemetryReading]:
-        """Load up to ``limit`` pending readings stored after ``after_id``, oldest first."""
+    def find_pending(self, after_id: int, limit: int, device_ids: Collection[str]) -> list[TelemetryReading]:
+        """Load up to ``limit`` pending readings of ``device_ids`` stored after ``after_id``, oldest first."""
+        ...
+
+    def count_pending_outside(self, device_ids: Collection[str]) -> int:
+        """Count the pending readings of the nodes not in ``device_ids``."""
         ...
 
     def save_sync_status(self, reading: TelemetryReading) -> None:
@@ -87,8 +92,12 @@ class ActuationEventRepository(Protocol):
         """
         ...
 
-    def find_pending(self, after_id: int, limit: int) -> list[ActuationEvent]:
-        """Load up to ``limit`` pending actions stored after ``after_id``, oldest first."""
+    def find_pending(self, after_id: int, limit: int, device_ids: Collection[str]) -> list[ActuationEvent]:
+        """Load up to ``limit`` pending actions of ``device_ids`` stored after ``after_id``, oldest first."""
+        ...
+
+    def count_pending_outside(self, device_ids: Collection[str]) -> int:
+        """Count the pending actions of the nodes not in ``device_ids``."""
         ...
 
     def save_sync_status(self, event: ActuationEvent) -> None:

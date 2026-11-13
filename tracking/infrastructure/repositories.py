@@ -5,6 +5,7 @@ the domain layer free of infrastructure concerns.
 """
 
 import json
+from collections.abc import Collection
 from datetime import UTC, datetime
 
 import peewee
@@ -37,6 +38,27 @@ def _count_by_sync_status(model) -> dict[SyncStatus, int]:
     return counts
 
 
+def _find_pending(model, after_id: int, limit: int, device_ids: Collection[str]):
+    return (
+        model.select()
+        .where(
+            (model.sync_status == SyncStatus.PENDING.value)
+            & (model.id > after_id)
+            & (model.device_id.in_(list(device_ids)))
+        )
+        .order_by(model.id)
+        .limit(limit)
+    )
+
+
+def _count_pending_outside(model, device_ids: Collection[str]) -> int:
+    return (
+        model.select()
+        .where((model.sync_status == SyncStatus.PENDING.value) & (model.device_id.not_in(list(device_ids))))
+        .count()
+    )
+
+
 def _delete_before(model, status: SyncStatus, cutoff: datetime, limit: int) -> int:
     """Delete up to ``limit`` rows of ``status`` received before ``cutoff``, in one short transaction."""
     ids = (
@@ -65,18 +87,13 @@ class TelemetryReadingRepository:
             with database.atomic("IMMEDIATE"):
                 return self._save(readings)
 
-    def find_pending(self, after_id: int, limit: int) -> list[TelemetryReading]:
-        """Load up to ``limit`` pending readings stored after ``after_id``, oldest first."""
-        query = (
-            TelemetryReadingModel.select()
-            .where(
-                (TelemetryReadingModel.sync_status == SyncStatus.PENDING.value)
-                & (TelemetryReadingModel.id > after_id)
-            )
-            .order_by(TelemetryReadingModel.id)
-            .limit(limit)
-        )
-        return [self._to_entity(row) for row in query]
+    def find_pending(self, after_id: int, limit: int, device_ids: Collection[str]) -> list[TelemetryReading]:
+        """Load up to ``limit`` pending readings of ``device_ids`` stored after ``after_id``, oldest first."""
+        return [self._to_entity(row) for row in _find_pending(TelemetryReadingModel, after_id, limit, device_ids)]
+
+    def count_pending_outside(self, device_ids: Collection[str]) -> int:
+        """Count the pending readings of the nodes not in ``device_ids``."""
+        return _count_pending_outside(TelemetryReadingModel, device_ids)
 
     def save_sync_status(self, reading: TelemetryReading) -> None:
         """Persist the synchronization status of a stored reading."""
@@ -148,18 +165,13 @@ class ActuationEventRepository:
             with database.atomic("IMMEDIATE"):
                 return self._save(event)
 
-    def find_pending(self, after_id: int, limit: int) -> list[ActuationEvent]:
-        """Load up to ``limit`` pending actions stored after ``after_id``, oldest first."""
-        query = (
-            ActuationEventModel.select()
-            .where(
-                (ActuationEventModel.sync_status == SyncStatus.PENDING.value)
-                & (ActuationEventModel.id > after_id)
-            )
-            .order_by(ActuationEventModel.id)
-            .limit(limit)
-        )
-        return [self._to_entity(row) for row in query]
+    def find_pending(self, after_id: int, limit: int, device_ids: Collection[str]) -> list[ActuationEvent]:
+        """Load up to ``limit`` pending actions of ``device_ids`` stored after ``after_id``, oldest first."""
+        return [self._to_entity(row) for row in _find_pending(ActuationEventModel, after_id, limit, device_ids)]
+
+    def count_pending_outside(self, device_ids: Collection[str]) -> int:
+        """Count the pending actions of the nodes not in ``device_ids``."""
+        return _count_pending_outside(ActuationEventModel, device_ids)
 
     def save_sync_status(self, event: ActuationEvent) -> None:
         """Persist the synchronization status of a stored action."""
