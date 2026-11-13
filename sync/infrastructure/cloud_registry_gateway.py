@@ -1,4 +1,4 @@
-"""Cloud gateway that reads the device registry of the laboratory.
+"""Cloud gateway that reads the IoT devices the cloud assigns to this Edge Gateway.
 
 It is the anti-corruption layer between the Equipment context of the cloud
 and Sync: it turns the equipment resources of the QualiTrack Cloud REST API
@@ -18,7 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class CloudDeviceRegistryGateway:
-    """Read the environmental devices and container monitors of the laboratory."""
+    """Read the environmental devices and container monitors of this Edge Gateway."""
 
     def __init__(self, cloud_session: CloudSession):
         self._cloud_session = cloud_session

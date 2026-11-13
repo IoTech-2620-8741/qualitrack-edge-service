@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Sync (sync): the telemetry and profile synchronization receive the repositories of Tracking from `create_app` instead of building them, so Sync uses only the model and contracts of Tracking, as ADR-0015 states; a test keeps it away from the infrastructure of Tracking. The docstrings of the registry describe the devices the cloud assigns to this Edge Gateway (#28).
+
 ## [0.3.0] - 2026-11-12
 
 ### Added
