@@ -254,7 +254,7 @@ Acceptance criteria:
 - Scenario: Oldest first
   - Given several pending readings
   - When the synchronization runs
-  - Then it sends them in the order the Edge received them, in batches, until none is left
+  - Then it sends them in the order the Edge received them, four at a time, until none is left
 
 ---
 

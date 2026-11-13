@@ -183,10 +183,11 @@ class CloudOverHttpTestCase(unittest.TestCase):
         telemetry = [(body, authorization) for method, path, body, authorization in FakeCloudHandler.received
                      if path == _ENVIRONMENT_TELEMETRY]
         self.assertEqual(len(telemetry), 2)
-        self.assertEqual(telemetry[0], ({
+        # The two readings are sent in parallel, so they may arrive in either order.
+        self.assertIn(({
             "metric": "AIR_QUALITY", "value": 412.5, "textValue": None,
             "measuredAt": measured_at.isoformat().replace("+00:00", "Z"), "profileVersion": 2,
-        }, "gateway-secret"))
+        }, "gateway-secret"), telemetry)
         with self.app.app_context():
             statuses = [row.sync_status for row in TelemetryReadingModel.select().order_by(TelemetryReadingModel.id)]
         self.assertEqual(statuses, ["SYNCED", "REJECTED"])

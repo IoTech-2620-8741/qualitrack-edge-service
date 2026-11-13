@@ -186,14 +186,16 @@ package "Tracking Bounded Context" #DEEAFF {
 
     interface "TelemetryReadingRepository\n<<Protocol>>" as ITelemetryReadingRepository {
       +save_idempotently(readings): TelemetryReadingSaveResult
-      +find_pending(after_id, limit): list[TelemetryReading]
+      +find_pending(after_id, limit, device_ids): list[TelemetryReading]
+      +count_pending_outside(device_ids): int
       +save_sync_status(reading)
       +count_by_sync_status(): dict[SyncStatus, int]
     }
 
     interface "ActuationEventRepository\n<<Protocol>>" as IActuationEventRepository {
       +save_idempotently(event): ActuationEventSaveResult
-      +find_pending(after_id, limit): list[ActuationEvent]
+      +find_pending(after_id, limit, device_ids): list[ActuationEvent]
+      +count_pending_outside(device_ids): int
       +save_sync_status(event)
       +count_by_sync_status(): dict[SyncStatus, int]
     }

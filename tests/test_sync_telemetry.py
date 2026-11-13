@@ -152,9 +152,17 @@ class InMemoryRecords:
     def __init__(self, *records):
         self.records = {record.id: record for record in records}
 
-    def find_pending(self, after_id, limit):
-        pending = [r for i, r in sorted(self.records.items()) if i > after_id and r.sync_status is SyncStatus.PENDING]
+    def find_pending(self, after_id, limit, device_ids):
+        pending = [
+            r for i, r in sorted(self.records.items())
+            if i > after_id and r.sync_status is SyncStatus.PENDING and r.device_id in device_ids
+        ]
         return pending[:limit]
+
+    def count_pending_outside(self, device_ids):
+        return sum(
+            1 for r in self.records.values() if r.sync_status is SyncStatus.PENDING and r.device_id not in device_ids
+        )
 
     def save_sync_status(self, record):
         self.records[record.id] = record
@@ -222,7 +230,8 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
 
         self.assertEqual(summaries["readings"], SynchronizationSummary(synced=2, rejected=1, waiting=2))
         self.assertEqual(summaries["actuation_events"], SynchronizationSummary(waiting=1))
-        self.assertEqual(gateway.sent, [("ENV-001", 1), ("ENV-001", 2), ("ENV-001", 5)])
+        # A window is sent in parallel, so only the set of records sent is fixed.
+        self.assertEqual(sorted(gateway.sent), [("ENV-001", 1), ("ENV-001", 2), ("ENV-001", 5)])
         self.assertEqual(
             [self.readings.status_of(i) for i in range(1, 6)],
             [SyncStatus.SYNCED, SyncStatus.REJECTED, SyncStatus.PENDING, SyncStatus.PENDING, SyncStatus.SYNCED],
@@ -234,6 +243,23 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
 
         self.assertEqual(self.readings.status_of(1), SyncStatus.SYNCED)
         self.assertEqual(self.readings.status_of(5), SyncStatus.PENDING)
+
+    def test_a_failure_keeps_the_other_answers_of_its_window_and_stops_before_the_next_one(self):
+        self.readings = InMemoryRecords(*(stored_reading(i, minutes=10 - i) for i in range(1, 8)))
+        gateway = FakeTelemetryGateway(fail_on=2)
+        service = TelemetrySynchronizationApplicationService(
+            gateway, self.devices, self.readings, self.events, batch_size=100
+        )
+
+        with self.assertRaises(CloudUnavailableError):
+            service.synchronize_pending()
+
+        self.assertEqual(sorted(record_id for _, record_id in gateway.sent), [1, 3, 4])
+        self.assertEqual(
+            [self.readings.status_of(i) for i in range(1, 8)],
+            [SyncStatus.SYNCED, SyncStatus.PENDING, SyncStatus.SYNCED, SyncStatus.SYNCED,
+             SyncStatus.PENDING, SyncStatus.PENDING, SyncStatus.PENDING],
+        )
 
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):
