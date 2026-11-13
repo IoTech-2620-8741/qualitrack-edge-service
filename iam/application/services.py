@@ -43,10 +43,6 @@ class AuthApplicationService:
             return None
         return device
 
-    def authenticate(self, device_id: str, api_key: str) -> bool:
-        """Check credentials against the identified device's access state."""
-        return self.authenticated_device(device_id, api_key) is not None
-
     def register_device(self, device_id: str, device_type: DeviceType) -> IssuedApiKey:
         """Register a device with a new random API key.
 

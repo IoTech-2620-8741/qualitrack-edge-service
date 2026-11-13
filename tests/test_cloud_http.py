@@ -227,7 +227,7 @@ class CloudOverHttpTestCase(unittest.TestCase):
         try:
             result = self.app.test_cli_runner().invoke(args=["cloud", "sync"])
         finally:
-            self.app.extensions["device_registry_service"] = DeviceRegistryApplicationService(None, self.layer())
+            self.app.extensions["device_registry_service"] = DeviceRegistryApplicationService(None, self.layer(), MonitoredDeviceRepository())
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn("Invalid Edge Gateway credentials", result.output)

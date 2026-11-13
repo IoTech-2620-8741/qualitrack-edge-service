@@ -46,7 +46,7 @@ class CloudProfileGateway:
             resource = response.json()
             if not isinstance(resource, dict):
                 raise ValueError("The profile must be a JSON object")
-            return self._to_profile(device.device_id, response.json())
+            return self._to_profile(device.device_id, resource)
         except (KeyError, TypeError, ValueError) as error:
             raise CloudRejectedError(f"The cloud sent a profile of {device.device_id} the Edge cannot read: {error}") \
                 from error

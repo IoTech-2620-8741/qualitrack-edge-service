@@ -218,9 +218,10 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
         self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001", "ENV-001"])
 
         service.synchronize_registry()
-        self.assertIsNone(service.find_monitored_device("ENV-001"))
-        self.assertEqual(service.find_monitored_device("CNT-001").environment_id, 3)
-        self.assertEqual(service.find_monitored_device("CNT-001").synced_at, NOW)
+        (container,) = service.monitored_devices()
+        self.assertEqual(container.device_id, "CNT-001")
+        self.assertEqual(container.environment_id, 3)
+        self.assertEqual(container.synced_at, NOW)
 
         with self.assertRaises(CloudUnavailableError):
             service.synchronize_registry()
@@ -248,7 +249,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
 
         self.assertEqual([d.device_id for d in service.monitored_devices()],["CNT-001", "CNT-OTHER", "ENV-001"])
 
-        self.assertIsNotNone(service.find_monitored_device("CNT-OTHER"))
+
 
     def test_needs_a_gateway_to_synchronize(self):
         with self.assertRaises(CloudSynchronizationDisabled):

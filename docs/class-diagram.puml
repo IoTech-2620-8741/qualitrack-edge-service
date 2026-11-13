@@ -49,7 +49,6 @@ package "IAM Bounded Context" #FFEBDE {
     class AuthApplicationService {
       +__init__(device_repository=None)
       +authenticated_device(device_id, api_key): Device | None
-      +authenticate(device_id, api_key): bool
       +register_device(device_id, device_type): IssuedApiKey
       +revoke_device(device_id): Device
       +rotate_api_key(device_id): IssuedApiKey
@@ -299,19 +298,19 @@ package "Sync Bounded Context" #F0E6FF {
 
   package "application" as sync_application #EADBFF {
     class DeviceRegistryApplicationService {
-      +__init__(registry_gateway, iam_anti_corruption_layer, monitored_device_repository=None)
+      +__init__(registry_gateway, iam_anti_corruption_layer, monitored_device_repository)
       +synchronize_registry(): RegistrySynchronization
       +monitored_devices(): list[MonitoredDevice]
       +enroll_device(device_id, device_type): str
     }
 
     class ProfileSynchronizationApplicationService {
-      +__init__(profile_gateway, monitored_device_repository=None, environmental_profile_repository=None)
+      +__init__(profile_gateway, monitored_device_repository, environmental_profile_repository)
       +synchronize_profiles(): list[EnvironmentalProfile]
     }
 
     class TelemetrySynchronizationApplicationService {
-      +__init__(telemetry_gateway, monitored_device_repository=None, telemetry_reading_repository=None, actuation_event_repository=None, batch_size=100)
+      +__init__(telemetry_gateway, monitored_device_repository, telemetry_reading_repository, actuation_event_repository, batch_size=100)
       +synchronize_pending(): dict[str, SynchronizationSummary]
       +pending_counts(): dict
       +purge(): int

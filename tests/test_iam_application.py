@@ -51,8 +51,8 @@ class AuthApplicationServiceTestCase(unittest.TestCase):
         issued = self.service.register_device("CNT-001", DeviceType.CONTAINER_MONITOR)
         rotated = self.service.rotate_api_key("CNT-001")
 
-        self.assertFalse(self.service.authenticate("CNT-001", issued.api_key))
-        self.assertTrue(self.service.authenticate("CNT-001", rotated.api_key))
+        self.assertIsNone(self.service.authenticated_device("CNT-001", issued.api_key))
+        self.assertIsNotNone(self.service.authenticated_device("CNT-001", rotated.api_key))
 
         self.service.revoke_device("CNT-001")
         self.assertIsNone(self.service.authenticated_device("CNT-001", rotated.api_key))

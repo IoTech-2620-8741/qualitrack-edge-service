@@ -20,7 +20,6 @@ from sync.application.gateways import DeviceRegistryGateway, ProfileGateway, Tel
 from sync.domain.entities import MonitoredDevice
 from sync.domain.enums import DeviceStatus
 from sync.domain.repositories import MonitoredDeviceRepository
-from sync.infrastructure.repositories import MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl
 from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
 from tracking.domain.entities import EnvironmentalProfile
 from tracking.domain.enums import DeviceType, SyncStatus
@@ -69,14 +68,15 @@ class DeviceRegistryApplicationService:
         self,
         registry_gateway: DeviceRegistryGateway | None,
         iam_anti_corruption_layer: IamAntiCorruptionLayer,
-        monitored_device_repository: MonitoredDeviceRepository | None = None,
+        monitored_device_repository: MonitoredDeviceRepository,
     ):
-        """Initialize the service; without a gateway the cloud synchronization is disabled."""
+        """Initialize the service; without a gateway the cloud synchronization is disabled.
+
+        ``create_app`` builds the repository (ADR-0015).
+        """
         self.registry_gateway = registry_gateway
         self.iam_anti_corruption_layer = iam_anti_corruption_layer
-        self.monitored_device_repository = (
-            monitored_device_repository or MonitoredDeviceRepositoryImpl()
-        )
+        self.monitored_device_repository = monitored_device_repository
 
     def synchronize_registry(self) -> RegistrySynchronization:
         """Synchronize all IoT devices assigned to this Edge Gateway.
@@ -104,10 +104,6 @@ class DeviceRegistryApplicationService:
     def monitored_devices(self) -> list[MonitoredDevice]:
         """Return the local copy of the registry, ordered by identifier."""
         return self.monitored_device_repository.find_all()
-
-    def find_monitored_device(self, device_id: str) -> MonitoredDevice | None:
-        """Return the cloud registration of one node, if the cloud registers it."""
-        return self.monitored_device_repository.find_by_device_id(device_id)
 
     def enroll_device(
         self,
