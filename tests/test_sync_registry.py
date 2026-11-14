@@ -6,7 +6,7 @@ from unittest.mock import patch
 from app import create_app
 from iam.infrastructure.models import Device as DeviceModel
 from shared.infrastructure.cloud_session import CloudRejectedError, CloudUnavailableError
-from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
+from shared.infrastructure.cloud_sync_scheduler import CloudSyncCycle, CloudSyncScheduler
 from sync.application.errors import CloudSynchronizationDisabled
 from sync.application.services import DeviceRegistryApplicationService
 from sync.domain.entities import MonitoredDevice
@@ -317,6 +317,35 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
         scheduler.start()
         self.assertTrue(ran.wait(5))
         scheduler.stop(5)
+
+    def test_keeps_when_the_last_cycle_ended_and_which_tasks_failed(self):
+        finished_at = datetime(2026, 11, 14, 4, 0, tzinfo=UTC)
+
+        def failing():
+            raise CloudUnavailableError("offline")
+
+        scheduler = CloudSyncScheduler(
+            60, [("registry", lambda: None), ("pending telemetry", failing)], clock=lambda: finished_at
+        )
+        self.assertIsNone(scheduler.last_cycle)
+
+        with self.assertLogs("shared.infrastructure.cloud_sync_scheduler", "WARNING"):
+            scheduler.run_once()
+
+        self.assertEqual(scheduler.last_cycle, CloudSyncCycle(finished_at, ("pending telemetry",)))
+
+    def test_reports_whether_the_background_thread_is_running(self):
+        started_at = datetime(2026, 11, 14, 4, 0, tzinfo=UTC)
+        scheduler = CloudSyncScheduler(60, [("task", lambda: None)], clock=lambda: started_at)
+        self.assertFalse(scheduler.is_running)
+        self.assertIsNone(scheduler.started_at)
+
+        scheduler.start()
+        self.assertTrue(scheduler.is_running)
+        self.assertEqual(scheduler.started_at, started_at)
+
+        scheduler.stop(5)
+        self.assertFalse(scheduler.is_running)
 
 
 class CloudCliTestCase(unittest.TestCase):
