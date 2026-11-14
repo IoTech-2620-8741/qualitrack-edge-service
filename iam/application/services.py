@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from iam.domain.credentials import ApiCredential
 from iam.domain.entities import Device
 from iam.domain.enums import DeviceType
-from iam.domain.errors import DeviceAlreadyRegistered
 from iam.domain.repositories import DeviceRepository
 from iam.infrastructure.repositories import DeviceRepository as PeeweeDeviceRepository
 
@@ -52,8 +51,6 @@ class AuthApplicationService:
                 registered, also by a request that ran at the same time.
             ValueError: The domain rejects the identity.
         """
-        if self.device_repository.find_by_device_id(device_id) is not None:
-            raise DeviceAlreadyRegistered
         api_key = ApiCredential.generate_secret()
         device = self.device_repository.add(
             Device.register(device_id, api_key, device_type)

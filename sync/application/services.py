@@ -14,7 +14,6 @@ from datetime import UTC, datetime, timedelta
 
 from sync.application.errors import (
     CloudSynchronizationDisabled,
-    DeviceAlreadyEnrolled,
     DeviceEnrollmentNotAllowed,
 )
 from sync.application.gateways import DeviceRegistryGateway, ProfileGateway, TelemetryGateway
@@ -147,11 +146,6 @@ class DeviceRegistryApplicationService:
             or device.status is not DeviceStatus.OPERATIONAL
         ):
             raise DeviceEnrollmentNotAllowed
-
-        registered = self.iam_anti_corruption_layer.registered_device_ids()
-
-        if device_id in registered:
-            raise DeviceAlreadyEnrolled
 
         return self.iam_anti_corruption_layer.enroll_device(
             device_id,
