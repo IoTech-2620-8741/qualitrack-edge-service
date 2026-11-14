@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 from typing import TypedDict
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
@@ -136,11 +137,16 @@ def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
 
     url = _required(values, "CLOUD_API_URL").strip().rstrip("/")
 
-    if not url.startswith(("http://", "https://")):
-        raise ValueError(
-            "CLOUD_API_URL must be an http or https URL"
-        )
-    if environment_name == "production" and not url.startswith("https://"):
+    try:
+        parsed_url = urlsplit(url)
+        _ = parsed_url.port  # Valida que el puerto, si existe, sea correcto.
+    except ValueError as error:
+        raise ValueError("CLOUD_API_URL must be a valid http or https URL") from error
+
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+        raise ValueError("CLOUD_API_URL must be a valid http or https URL")
+
+    if environment_name == "production" and parsed_url.scheme != "https":
         raise ValueError("CLOUD_API_URL must use https in production")
     device_id = _required(values, "CLOUD_DEVICE_ID").strip()
     api_key = _required(values, "CLOUD_API_KEY").strip()
