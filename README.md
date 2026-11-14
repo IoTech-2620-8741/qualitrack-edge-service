@@ -45,6 +45,8 @@ The QualiTrack nodes are:
   - SQLite persistence through Peewee
   - deployment on the local station with Docker Compose and Gunicorn, with the
     database in the `qualitrack-data` volume (report 4.1.3.4)
+  - health of the Edge at `GET /api/v1/health`, which Docker checks every 30
+    seconds (ADR-0017)
 
 These cover the Edge stories of the QualiTrack Report (epic EP07, TS53–TS64).
 
@@ -94,7 +96,8 @@ of Tracking directly, and Tracking does not depend on it (ADR-0015).
 
 Infrastructure shared by the bounded contexts: the SQLite database, the
 authenticated session with the cloud and the background synchronization
-thread.
+thread. Its interfaces layer reports the health of the Edge at
+`GET /api/v1/health` (ADR-0017).
 
 ## Layered Architecture
 
@@ -136,7 +139,8 @@ qualitrack-edge-service/
 │   ├── infrastructure/
 │   └── interfaces/
 ├── shared/
-│   └── infrastructure/
+│   ├── infrastructure/
+│   └── interfaces/      # GET /api/v1/health
 ├── docs/                # technical stories, class diagram, ADRs
 └── tests/
 ```
@@ -344,7 +348,10 @@ docker compose logs -f qualitrack-edge
 ```
 
 The Edge listens on port `5000` of the station; the nodes use
-`http://<station address>:5000/api/v1`.
+`http://<station address>:5000/api/v1`. Docker checks
+`GET /api/v1/health` every 30 seconds: `docker compose ps` shows the container
+as `healthy`, or `unhealthy` when the database cannot be read. Docker does not
+restart an unhealthy container by itself; check `docker compose logs`.
 
 ### 3. Register the nodes and check the cloud
 
@@ -367,9 +374,45 @@ docker compose up -d --build
 `docker compose down` stops the service and keeps the volume; only
 `docker compose down -v` deletes the database. The CI builds the image for
 `linux/arm64`, the architecture of the Raspberry Pi 4, and runs the compose
-file to check the service, the commands and the volume.
+file to check the service, its health check, the commands and the volume.
 
 ## API Contract
+
+### Check the health of the Edge
+
+`GET /api/v1/health`
+
+Needs no API key, so Docker and a technician of the local network can call
+it; it shows no identifiers, keys or error messages (ADR-0017). The Edge is
+`ok` while its database answers. A cloud synchronization that failed in its
+last cycle, stopped, or ended no cycle in three intervals makes it
+`degraded`, while the nodes are still served and their records stay
+`PENDING`.
+
+| Response | When |
+|---|---|
+| `200 OK` | `status` is `ok` or `degraded` |
+| `503 Service Unavailable` | `status` is `unavailable`: the database cannot be read |
+
+```json
+{
+  "status": "degraded",
+  "database": "ok",
+  "cloud_sync": {
+    "enabled": true,
+    "running": true,
+    "last_cycle_at": "2026-11-14T04:00:00Z",
+    "failed_tasks": ["pending telemetry"],
+    "behind": false
+  }
+}
+```
+
+`failed_tasks` names the tasks of the last cycle that failed: `device
+registry`, `environmental profiles`, `pending telemetry` or `telemetry purge`;
+`docker compose logs` has the reason. While `CLOUD_SYNC_ENABLED` is `false`,
+`cloud_sync` is `{"enabled": false}`. `flask --app app cloud pending` counts
+the pending records, which the check leaves out so that it stays cheap.
 
 ### Sign in a node
 
