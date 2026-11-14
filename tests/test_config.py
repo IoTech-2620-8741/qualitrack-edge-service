@@ -76,6 +76,40 @@ class LoadConfigTestCase(unittest.TestCase):
                 ValueError, "DEBUG must be set"
             ):
                 load_config(root)
+    def test_rejects_cloud_urls_without_hostname_or_with_invalid_port(self):
+        cloud_settings = {
+            "CLOUD_SYNC_ENABLED": "true",
+            "CLOUD_DEVICE_ID": "EDGE-001",
+            "CLOUD_API_KEY": "gateway-secret",
+            "CLOUD_SYNC_INTERVAL_SECONDS": "60",
+        }
+
+        invalid_urls = (
+            "https:///missing-host",
+            "https://cloud.example:invalid",
+            "https://user:secret@cloud.example",
+            "https://cloud.example?token=secret",
+            "https://cloud.example/#section",
+        )
+
+        for url in invalid_urls:
+            with self.subTest(url=url), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_environment_file(
+                    root,
+                    "development",
+                    **{**cloud_settings, "CLOUD_API_URL": url},
+                )
+
+                with patch.dict(
+                    os.environ,
+                    {"APP_ENV": "development"},
+                    clear=True,
+                ), self.assertRaisesRegex(
+                    ValueError, "valid http or https URL"
+                ):
+                    load_config(root)
+
 
     def test_rejects_debug_or_test_seeding_in_production(self):
         for setting in (
