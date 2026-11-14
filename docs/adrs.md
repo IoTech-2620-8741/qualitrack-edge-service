@@ -25,7 +25,8 @@ Each record includes:
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended by**: ADR-0015, which moves the cloud synchronization to the Sync context
+- **Amended by**: ADR-0015, which moves the cloud synchronization to the Sync context;
+  ADR-0017, which gives Shared an interfaces layer for the health of the Edge
 
 ### Context
 
@@ -617,3 +618,58 @@ registered again; `flask devices rotate-key` replaces it with a SHA-256 one.
   threads and does not lower the cost of the legitimate requests.
 - Upgrading the verifier on the next successful sign-in, which writes to the
   database in the authentication path.
+
+## ADR-0017: Report the health of the Edge at GET /api/v1/health
+
+- **Status**: Accepted
+- **Date**: 2026-11-14
+- **Amends**: ADR-0001
+
+### Context
+
+The local station runs unattended. Docker restarts the container when
+Gunicorn exits, but it cannot tell a process that runs from one that works,
+and the CI waited for the service by expecting a `401` from the sign-in. The
+Edge must keep serving the nodes while the cloud is unreachable (ADR-0007), so
+a cloud outage is not a failure of the station, but the technicians need to
+see it.
+
+### Decision
+
+`GET /api/v1/health`, in a new interfaces layer of Shared, because the health
+of the Edge is not the behavior of any context:
+
+- `EdgeHealthCheck` reads the schema of the SQLite database and the last cycle
+  that `CloudSyncScheduler` keeps in memory: when it ended and which tasks
+  failed. It runs no counts.
+- The status is `unavailable` with `503` when the database cannot be read;
+  `degraded` with `200` when the synchronization is enabled and its last cycle
+  had a failed task, its thread stopped, or no cycle ended in three
+  intervals; `ok` with `200` otherwise.
+- It needs no API key and answers states and one time, never identifiers,
+  keys or error messages.
+- The image declares a `HEALTHCHECK` that calls it every 30 seconds with the
+  Python of the image, which has no curl; the CI waits on it.
+
+### Consequences
+
+- `docker compose ps` shows whether the Edge works, and the CI checks the
+  same thing the station does.
+- A cloud outage keeps the container healthy; only the response shows it.
+- Docker does not restart an unhealthy container by itself, so the status
+  reports a broken database but does not repair it.
+- Gunicorn logs each check, about 2,900 lines a day, within the 30 MB of logs
+  that `docker-compose.yml` keeps.
+- The pending records stay in `flask cloud pending`, because counting them
+  every 30 seconds would scan the telemetry tables on the Raspberry Pi.
+
+### Alternatives considered
+
+- Answering `503` while the cloud fails, which would mark the station
+  unhealthy during the outages it is built to survive.
+- Requiring an API key, which Docker would need to keep in the image or its
+  settings.
+- Installing curl in the image for the `HEALTHCHECK`, which adds a package
+  only for it.
+- Including the pending counts in the response, which adds a query of the
+  largest tables to every check.

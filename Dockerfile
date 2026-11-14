@@ -28,4 +28,9 @@ USER edge
 VOLUME /data
 EXPOSE 5000
 
+# Docker asks the Edge itself whether it works (ADR-0017): GET /api/v1/health
+# answers 503 when the database cannot be read. The slim image has no curl.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '5000') + '/api/v1/health', timeout=4)"
+
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "wsgi:app"]

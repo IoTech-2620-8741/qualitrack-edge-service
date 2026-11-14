@@ -1,7 +1,7 @@
 """Flask application entry point for the QualiTrack Edge Service.
 
 This module wires together the Flask application, registers the IAM, Tracking and Sync
-bounded-context Blueprints and the command groups, configures the SQLite
+bounded-context Blueprints, the health Blueprint and the command groups, configures the SQLite
 database, and composes the anti-corruption layers of Tracking and Sync with IAM and the
 cloud synchronization of the Sync context.
 
@@ -27,7 +27,9 @@ from iam.interfaces.cli import devices_cli
 from iam.interfaces.services import iam_api
 from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
-from shared.infrastructure.database import configure_database, db, init_db
+from shared.infrastructure.database import configure_database, database_available, db, init_db
+from shared.infrastructure.health import EdgeHealthCheck
+from shared.interfaces.services import health_api
 from sync.application.services import (
     DeviceRegistryApplicationService,
     ProfileSynchronizationApplicationService,
@@ -62,6 +64,7 @@ def create_app() -> Flask:
     app.register_blueprint(iam_api)
     app.register_blueprint(tracking_api)
     app.register_blueprint(sync_api)
+    app.register_blueprint(health_api)
     app.cli.add_command(devices_cli)
     app.cli.add_command(cloud_cli)
     iam_authentication_service = AuthApplicationService()
@@ -114,6 +117,9 @@ def create_app() -> Flask:
                 ("telemetry purge", telemetry_synchronization_service.purge),
             ],
         )
+    app.extensions["edge_health_check"] = EdgeHealthCheck(
+        database_available, app.extensions.get("cloud_sync_scheduler")
+    )
 
     if app.config["SEED_TEST_DEVICE"]:
         iam_authentication_service.get_or_create_test_device(

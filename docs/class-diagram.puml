@@ -377,23 +377,68 @@ package "Sync Bounded Context" #F0E6FF {
   }
 }
 
-package "Shared Infrastructure" #E8FFE8 {
-  class db <<SqliteDatabase>>
+package "Shared" #E8FFE8 {
+  package "infrastructure" as shared_infrastructure #DDF5DD {
+    class db <<SqliteDatabase>> {
+      +database_available(): bool
+    }
 
-  class CloudSession {
-    +__init__(base_url, device_id, api_key, http_client=None)
-    +device_id: str
-    +request(method, path, json=None): Response
+    class CloudSession {
+      +__init__(base_url, device_id, api_key, http_client=None)
+      +device_id: str
+      +request(method, path, json=None): Response
+    }
+
+    class CloudSyncScheduler {
+      +__init__(interval_seconds, tasks, clock=None)
+      +interval_seconds: int
+      +is_running: bool
+      +started_at: datetime | None
+      +last_cycle: CloudSyncCycle | None
+      +run_once(): dict[str, object]
+      +start()
+      +stop(timeout=None)
+    }
+
+    class CloudSyncCycle {
+      +finished_at: datetime
+      +failed_tasks: tuple[str, ...]
+    }
+
+    class CloudRequestError
+
+    class EdgeHealthCheck {
+      +__init__(database_check, scheduler, clock=None)
+      +report(): HealthReport
+    }
+
+    class HealthReport {
+      +status: HealthStatus
+      +database_available: bool
+      +cloud_sync: CloudSyncHealth
+    }
+
+    class CloudSyncHealth {
+      +enabled: bool
+      +running: bool
+      +last_cycle_at: datetime | None
+      +failed_tasks: tuple[str, ...]
+      +behind: bool
+      +degraded: bool
+    }
+
+    enum HealthStatus {
+      OK
+      DEGRADED
+      UNAVAILABLE
+    }
   }
 
-  class CloudSyncScheduler {
-    +__init__(interval_seconds, tasks)
-    +run_once(): dict[str, object]
-    +start()
-    +stop(timeout=None)
+  package "interfaces" as shared_interfaces #D0EED0 {
+    class health_api <<Flask Blueprint>> {
+      +GET /api/v1/health
+    }
   }
-
-  class CloudRequestError
 }
 
 class create_app {
@@ -487,6 +532,13 @@ TelemetryReadingModel --> db
 ActuationEventModel --> db
 EnvironmentalProfileModel --> db
 CloudSyncScheduler ..> db : one connection per task
+CloudSyncScheduler --> CloudSyncCycle : keeps the last
+EdgeHealthCheck ..> db : reads the schema
+EdgeHealthCheck --> CloudSyncScheduler : reads the last cycle
+EdgeHealthCheck ..> HealthReport : returns
+HealthReport --> HealthStatus
+HealthReport --> CloudSyncHealth
+health_api --> EdgeHealthCheck : invokes
 
 create_app ..> AuthApplicationService : composes
 create_app ..> IamAntiCorruptionLayer : composes
@@ -498,9 +550,11 @@ create_app ..> ProfileSynchronizationApplicationService : composes
 create_app ..> TelemetrySynchronizationApplicationService : composes
 create_app ..> CloudSession : composes when CLOUD_SYNC_ENABLED
 create_app ..> CloudSyncScheduler : registry, profiles, telemetry
+create_app ..> EdgeHealthCheck : composes
 create_app ..> iam_api : registers
 create_app ..> tracking_api : registers
 create_app ..> sync_api : registers
+create_app ..> health_api : registers
 create_app ..> devices_cli : registers
 create_app ..> cloud_cli : registers
 wsgi ..> create_app : starts cloud sync in the worker

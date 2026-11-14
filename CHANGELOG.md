@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Shared (shared): `GET /api/v1/health` reports whether the Edge can serve the nodes. It answers `503` with `unavailable` when the SQLite database cannot be read, and `200` with `ok`, or with `degraded` while the cloud synchronization fails, stops or ends no cycle in three intervals; the nodes are still served then. It needs no API key and shows no identifiers, keys or error messages. `CloudSyncScheduler` keeps the outcome of its last cycle for it (ADR-0017).
+- The Docker image checks `GET /api/v1/health` every 30 seconds, so `docker compose ps` shows the container as `healthy` or `unhealthy`; the CI waits on the endpoint and on that state instead of expecting a `401` from the sign-in (ADR-0017).
+
 ### Changed
 
 - Sync (sync): the pending readings and actions are sent four at a time instead of one by one, so the Edge keeps up with 15 nodes when the cloud is slow; an outage still stops the synchronization once the records in flight are answered. The records of nodes the registry does not place in an environment are filtered and counted in SQL instead of being read on every cycle.
