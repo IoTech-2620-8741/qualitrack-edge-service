@@ -24,7 +24,10 @@ NOW = datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
 
 
 class IamAntiCorruptionLayerTestCase(unittest.TestCase):
+    """Tests the translation of IAM authentication into the Tracking concept."""
+
     def test_translates_iam_authentication_to_the_tracking_concept(self):
+        """A valid key returns the ReportingDevice; an invalid one returns None."""
         class FakeIamDevice:
             device_id = "CNT-001"
             device_type = IamDeviceType.CONTAINER_MONITOR
@@ -40,6 +43,7 @@ class IamAntiCorruptionLayerTestCase(unittest.TestCase):
             ReportingDevice("CNT-001", DeviceType.CONTAINER_MONITOR),
         )
         self.assertIsNone(layer.authenticated_reporting_device("CNT-001", "invalid"))
+
 
 class FakeLayer:
     def __init__(self, device):
@@ -59,6 +63,13 @@ class InMemoryRepository:
 
 
 class TelemetryApplicationServiceTestCase(unittest.TestCase):
+    """Tests the use cases that record readings and actuation events.
+
+    Validates that one pending reading is created per metric, that unknown nodes
+    or wrong types are rejected, that empty readings are rejected, and that only
+    container monitors can send actions.
+    """
+
     def setUp(self):
         self.readings = InMemoryRepository()
         self.events = InMemoryRepository()
@@ -70,6 +81,7 @@ class TelemetryApplicationServiceTestCase(unittest.TestCase):
         )
 
     def test_creates_one_pending_reading_per_metric_received_now(self):
+        """Each metric becomes a PENDING reading with received_at = now."""
         readings = self.service.record_readings(
             "CNT-001", "secret", DeviceType.CONTAINER_MONITOR, NOW, 3,
             {Metric.TEMPERATURE: 21.5, Metric.RFID_TAG: "E200-3412-0001"},
@@ -79,6 +91,7 @@ class TelemetryApplicationServiceTestCase(unittest.TestCase):
         self.assertTrue(all(r.received_at == NOW and r.sync_status is SyncStatus.PENDING for r in readings))
 
     def test_rejects_unknown_nodes_other_types_and_empty_readings(self):
+        """Wrong credentials, wrong node type and empty readings are rejected."""
         with self.assertRaises(DeviceAuthenticationFailed):
             self.service.record_readings("CNT-001", "invalid", DeviceType.CONTAINER_MONITOR, NOW, None,
                                          {Metric.TEMPERATURE: 20})
@@ -90,6 +103,7 @@ class TelemetryApplicationServiceTestCase(unittest.TestCase):
         self.assertEqual(self.readings.saved, [])
 
     def test_only_container_monitors_send_actions(self):
+        """An environmental device cannot record an actuation event."""
         service = TelemetryApplicationService(
             FakeLayer(ReportingDevice("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)),
             self.readings, self.events, clock=lambda: NOW,
@@ -124,6 +138,7 @@ class TelemetryApiTestCase(unittest.TestCase):
         return (datetime.now(UTC) - timedelta(minutes=minutes)).isoformat()
 
     def test_environment_readings_are_stored_pending_and_retries_are_not_duplicated(self):
+        """A valid reading is stored as PENDING; an identical retry returns it with 200."""
         body = {"device_id": "ENV-001", "measured_at": self.at(30), "profile_version": 2,
                 "air_quality": 412.5, "motion": True}
 
@@ -143,6 +158,7 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertGreaterEqual(stored, 2)
 
     def test_container_readings_with_a_changed_value_conflict_and_store_nothing(self):
+        """A retry with different data returns 409 and stores nothing of the request."""
         measured_at = self.at(40)
         first = self.post("/api/v1/monitoring/container-readings",
                           {"device_id": "CNT-API", "measured_at": measured_at, "humidity": 48},
@@ -162,6 +178,7 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertEqual(stored, ["HUMIDITY"])
 
     def test_container_reading_with_every_metric(self):
+        """A container reading with every metric returns them in order."""
         response = self.post("/api/v1/monitoring/container-readings", {
             "device_id": "CNT-API", "measured_at": self.at(50), "profile_version": 3,
             "temperature": 21.5, "humidity": 48, "luminosity": 120, "rfid_tag": "E200-3412-0001",
@@ -173,6 +190,7 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertEqual(response.json["readings"][3]["text_value"], "E200-3412-0001")
 
     def test_rejects_credentials_and_node_types(self):
+        """Missing keys return 401; a wrong node type returns 403."""
         body = {"device_id": "ENV-001", "measured_at": self.at(60), "temperature": 21.5}
         for api_key, expected in ((None, 401), ("invalid-key", 401), ("test-only-key", 403)):
             with self.subTest(api_key=api_key):
@@ -183,6 +201,7 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertEqual(missing_device.status_code, 401)
 
     def test_rejects_invalid_readings(self):
+        """Invalid readings return 400; a non-JSON request returns 415."""
         for body in (
             {"device_id": "ENV-001", "measured_at": self.at(70)},
             {"device_id": "ENV-001", "measured_at": "2026-11-03T10:00:00", "air_quality": 400},
@@ -200,6 +219,7 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertEqual(non_json.status_code, 415)
 
     def test_actuation_events_are_stored_once(self):
+        """A valid action is stored once; a retry returns it; different data conflicts."""
         body = {"device_id": "CNT-API", "action": "VENTILATION_ON", "trigger_metric": "TEMPERATURE",
                 "trigger_state": "WARNING", "occurred_at": self.at(80), "profile_version": 3}
 
@@ -215,6 +235,7 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertEqual(changed.status_code, 409)
 
     def test_rejects_invalid_actuation_events(self):
+        """Invalid actions return 400; a wrong node type returns 403."""
         base = {"device_id": "CNT-API", "action": "SERVO_OPEN", "occurred_at": self.at(90)}
         for body, api_key, expected in (
             ({**base, "trigger_metric": "TEMPERATURE"}, self.container_key, 400),
@@ -226,6 +247,7 @@ class TelemetryApiTestCase(unittest.TestCase):
                 self.assertEqual(self.post("/api/v1/control/actuation-events", body, api_key).status_code, expected)
 
     def test_the_pending_command_counts_the_stored_records(self):
+        """`cloud pending` counts readings and actions by synchronization status."""
         self.post("/api/v1/control/actuation-events",
                   {"device_id": "CNT-API", "action": "SERVO_CLOSE", "occurred_at": self.at(100)},
                   self.container_key)
@@ -238,11 +260,14 @@ class TelemetryApiTestCase(unittest.TestCase):
 
 
 class TelemetryRepositoryTestCase(unittest.TestCase):
+    """Tests the persistence rules of readings and actions in SQLite."""
+
     @classmethod
     def setUpClass(cls):
         cls.app = create_app()
 
     def test_a_conflicting_submission_stores_none_of_its_readings(self):
+        """A conflicting submission stores none of its readings, in one transaction."""
         service = TelemetryApplicationService(
             FakeLayer(ReportingDevice("CNT-REPO", DeviceType.CONTAINER_MONITOR)), clock=lambda: NOW
         )
@@ -258,6 +283,7 @@ class TelemetryRepositoryTestCase(unittest.TestCase):
         self.assertEqual(stored, ["TEMPERATURE"])
 
     def test_actions_keep_their_cause_and_result(self):
+        """An action keeps its cause and result; a retry returns the stored one."""
         service = TelemetryApplicationService(
             FakeLayer(ReportingDevice("CNT-REPO", DeviceType.CONTAINER_MONITOR)), clock=lambda: NOW
         )
@@ -274,6 +300,7 @@ class TelemetryRepositoryTestCase(unittest.TestCase):
         self.assertEqual(retry.event, first.event)
 
     def test_deletes_only_the_records_of_a_status_received_before_the_cutoff(self):
+        """`delete_before` deletes only the records of the given status before the cutoff."""
         old, recent = NOW - timedelta(days=10), NOW
         readings_repository, events_repository = TelemetryReadingRepositoryImpl(), ActuationEventRepositoryImpl()
         layer = FakeLayer(ReportingDevice("CNT-PURGE", DeviceType.CONTAINER_MONITOR))
