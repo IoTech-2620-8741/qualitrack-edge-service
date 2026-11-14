@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared (shared): the background synchronization logs how long each cycle and each task took, and warns when a cycle takes longer than `CLOUD_SYNC_INTERVAL_SECONDS`.
 - IAM (iam): new API keys are kept as a SHA-256 verifier instead of PBKDF2, so checking the key of a node no longer takes tens of milliseconds of the Raspberry Pi on every request. Verifiers stored before keep working; `flask devices rotate-key` replaces them (ADR-0016).
 - Sync (sync): `DeviceRegistryApplicationService` requires its repository from `create_app`, as the other Sync services do (ADR-0015).
-- IAM (iam) and Sync (sync): a second registration or enrollment of the same node is refused only by the primary key of the devices table; the lookups made before the insert, which it already covered, are removed. `flask devices register` still answers "already registered" and `POST /api/v1/devices/enroll` still answers `409`.
+- IAM (iam) and Sync (sync): a second registration or enrollment of the same node is refused only by the primary key of the devices table; the lookups made before the insert, which it already covered, are removed. `flask devices register` still answers "already registered" and `POST /api/v1/devices/enroll` still answers `409` (#32).
 
 ### Fixed
 
