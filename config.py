@@ -143,7 +143,14 @@ def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
     except ValueError as error:
         raise ValueError("CLOUD_API_URL must be a valid http or https URL") from error
 
-    if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+    if (
+        parsed_url.scheme not in {"http", "https"}
+        or not parsed_url.hostname
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
         raise ValueError("CLOUD_API_URL must be a valid http or https URL")
 
     if environment_name == "production" and parsed_url.scheme != "https":

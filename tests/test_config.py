@@ -87,6 +87,9 @@ class LoadConfigTestCase(unittest.TestCase):
         invalid_urls = (
             "https:///missing-host",
             "https://cloud.example:invalid",
+            "https://user:secret@cloud.example",
+            "https://cloud.example?token=secret",
+            "https://cloud.example/#section",
         )
 
         for url in invalid_urls:
