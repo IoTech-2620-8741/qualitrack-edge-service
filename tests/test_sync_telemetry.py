@@ -58,7 +58,10 @@ def received_event(event_id, status, days_ago):
 
 
 class SynchronizedTestCase(unittest.TestCase):
+    """Tests the transition of a pending record when the cloud answers."""
+
     def test_only_a_pending_record_takes_the_answer_of_the_cloud(self):
+        """Only a pending record can become SYNCED or REJECTED."""
         synced = stored_reading(1).synchronized(SyncStatus.SYNCED)
 
         self.assertEqual(synced.sync_status, SyncStatus.SYNCED)
@@ -93,7 +96,15 @@ class FakeCloudSession:
 
 
 class CloudTelemetryGatewayTestCase(unittest.TestCase):
+    """Tests the translation of an Edge record into a cloud request.
+
+    Validates the route used for environmental and container readings, the
+    shape of the request body, and the classification of the cloud answers:
+    201/200 → SYNCED, 400/404 → REJECTED, other statuses → CloudRejectedError.
+    """
+
     def test_sends_environmental_readings_to_the_environment_route(self):
+        """An environmental reading is sent to the environment route."""
         session = FakeCloudSession(201)
 
         answer = CloudTelemetryGateway(session).send_reading(
@@ -115,6 +126,7 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         )])
 
     def test_sends_container_readings_and_actions_to_the_container_monitor_route(self):
+        """Container readings and actions are sent to their own routes."""
         session = FakeCloudSession(200)
         gateway = CloudTelemetryGateway(session)
         container = placed("CNT-001", DeviceType.CONTAINER_MONITOR, 3, 16)
@@ -136,6 +148,7 @@ class CloudTelemetryGatewayTestCase(unittest.TestCase):
         })
 
     def test_a_refused_record_is_rejected_and_other_answers_stop_the_synchronization(self):
+        """400/404 reject the record; other statuses raise CloudRejectedError."""
         device = placed("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)
         for status in (400, 404):
             with self.subTest(status=status), self.assertLogs(
@@ -204,6 +217,13 @@ class FakeTelemetryGateway:
 
 
 class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
+    """Tests the application service that sends the pending records to the cloud.
+
+    Validates the oldest-first ordering, the batching, the handling of nodes not
+    placed in an environment, the stopping on cloud failures, and the retry of
+    actions after an outage.
+    """
+
     def setUp(self):
         self.devices = InMemoryDevices(
             placed("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE),
@@ -224,6 +244,7 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
         )
 
     def test_sends_the_records_of_placed_nodes_oldest_first_and_keeps_the_others_pending(self):
+        """Only the records of placed nodes are sent, oldest first; the rest wait."""
         gateway = FakeTelemetryGateway()
 
         summaries = self.service(gateway).synchronize_pending()
@@ -238,6 +259,7 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
         )
 
     def test_an_unreachable_cloud_stops_and_keeps_the_answers_already_received(self):
+        """A cloud failure stops the sync but keeps the answers already received."""
         with self.assertRaises(CloudUnavailableError):
             self.service(FakeTelemetryGateway(fail_on=5)).synchronize_pending()
 
@@ -245,6 +267,7 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
         self.assertEqual(self.readings.status_of(5), SyncStatus.PENDING)
 
     def test_a_failure_keeps_the_other_answers_of_its_window_and_stops_before_the_next_one(self):
+        """A failure in a window keeps the other answers and stops before the next window."""
         self.readings = InMemoryRecords(*(stored_reading(i, minutes=10 - i) for i in range(1, 8)))
         gateway = FakeTelemetryGateway(fail_on=2)
         service = TelemetrySynchronizationApplicationService(
@@ -262,6 +285,7 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
         )
 
     def test_needs_a_gateway_to_synchronize(self):
+        """Without a cloud gateway, synchronization raises CloudSynchronizationDisabled."""
         with self.assertRaises(CloudSynchronizationDisabled):
             TelemetrySynchronizationApplicationService(None, self.devices, self.readings, self.events).synchronize_pending()
 
@@ -287,6 +311,13 @@ class TelemetrySynchronizationApplicationServiceTestCase(unittest.TestCase):
 
 
 class PurgeTestCase(unittest.TestCase):
+    """Tests the deletion of the records the cloud already answered.
+
+    Validates the retention by status (7 days for SYNCED, 90 for REJECTED,
+    never PENDING), the batching with pauses, the hourly cap, and the retry
+    after a repository failure.
+    """
+
     def setUp(self):
         self.now = NOW
         self.pauses = []
@@ -310,6 +341,7 @@ class PurgeTestCase(unittest.TestCase):
         )
 
     def test_deletes_the_synchronized_after_7_days_and_the_rejected_after_90_and_never_the_pending(self):
+        """Only the old SYNCED and REJECTED records are deleted; PENDING is kept."""
         deleted = self.service().purge()
 
         self.assertEqual(deleted, 4)
@@ -317,6 +349,7 @@ class PurgeTestCase(unittest.TestCase):
         self.assertEqual(sorted(self.events.records), [3])
 
     def test_deletes_in_batches_with_a_pause_between_them(self):
+        """The purge deletes in batches and pauses between them."""
         self.readings = InMemoryRecords(*(received_reading(i, SyncStatus.SYNCED, days_ago=10) for i in range(1, 6)))
 
         with patch("sync.application.services.PURGE_BATCH_SIZE", 2):
@@ -327,6 +360,7 @@ class PurgeTestCase(unittest.TestCase):
         self.assertEqual(self.pauses, [PURGE_PAUSE_SECONDS, PURGE_PAUSE_SECONDS])
 
     def test_runs_at_most_once_an_hour(self):
+        """The purge runs at most once an hour."""
         service = self.service()
         self.assertEqual(service.purge(), 4)
         self.readings.records[6] = received_reading(6, SyncStatus.SYNCED, days_ago=10)
@@ -340,6 +374,7 @@ class PurgeTestCase(unittest.TestCase):
         self.assertNotIn(6, self.readings.records)
 
     def test_needs_no_connection_with_the_cloud(self):
+        """The purge works without a cloud connection."""
         self.assertEqual(self.service().purge(), 4)
 
 
