@@ -41,7 +41,16 @@ def write_environment_file(root, environment, **overrides):
 
 
 class LoadConfigTestCase(unittest.TestCase):
+    """Tests the loading and validation of the environment settings.
+
+    Validates that the selected .env file is read, that process environment
+    variables override it, that production defaults are secure, that missing or
+    invalid settings raise ValueError, and that cloud settings are required only
+    when synchronization is enabled.
+    """
+
     def test_loads_selected_dotenv_and_process_environment_overrides_it(self):
+        """The .env file is read and the process environment overrides it."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_environment_file(root, "development", DATABASE_PATH="local.db", PORT="4000")
@@ -57,6 +66,7 @@ class LoadConfigTestCase(unittest.TestCase):
         self.assertEqual(config["DATABASE_PATH"], str(root / "override.db"))
 
     def test_production_defaults_are_secure(self):
+        """Production defaults disable debug and test seeding."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_environment_file(root, "production")
@@ -69,6 +79,7 @@ class LoadConfigTestCase(unittest.TestCase):
         self.assertEqual(config["DATABASE_PATH"], str(root / "data/edge.db"))
 
     def test_requires_settings_to_be_defined_in_file_or_process_environment(self):
+        """A missing required setting raises ValueError."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env.development").write_text("APP_ENV=development\n")
@@ -78,6 +89,7 @@ class LoadConfigTestCase(unittest.TestCase):
                 load_config(root)
 
     def test_rejects_debug_or_test_seeding_in_production(self):
+        """Debug or test seeding in production raises ValueError."""
         for setting in (
             {"DEBUG": "true"},
             {"SEED_TEST_DEVICE": "true", "TEST_DEVICE_API_KEY": "local-secret"},
@@ -90,6 +102,7 @@ class LoadConfigTestCase(unittest.TestCase):
                     load_config(Path(directory))
 
     def test_requires_key_for_development_device_seed(self):
+        """Seeding a development device requires TEST_DEVICE_API_KEY."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_environment_file(root, "development")
@@ -101,6 +114,7 @@ class LoadConfigTestCase(unittest.TestCase):
                 load_config(root)
 
     def test_retention_days_default_to_7_and_90_and_can_be_set(self):
+        """Retention days default to 7 and 90 and can be overridden."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_environment_file(root, "development")
@@ -117,6 +131,7 @@ class LoadConfigTestCase(unittest.TestCase):
         self.assertEqual((configured["SYNCED_RETENTION_DAYS"], configured["REJECTED_RETENTION_DAYS"]), (3, 30))
 
     def test_rejects_retention_days_that_are_not_a_positive_integer(self):
+        """Retention days must be positive integers; otherwise ValueError."""
         for name in ("SYNCED_RETENTION_DAYS", "REJECTED_RETENTION_DAYS"):
             for value, message in (("0", "at least 1"), ("-5", "at least 1"), ("week", "an integer")):
                 with self.subTest(name=name, value=value), tempfile.TemporaryDirectory() as directory:
@@ -128,6 +143,7 @@ class LoadConfigTestCase(unittest.TestCase):
                         load_config(root)
 
     def test_cloud_settings_are_optional_while_the_synchronization_is_disabled(self):
+        """Cloud settings are optional when synchronization is disabled."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_environment_file(root, "development")
@@ -139,6 +155,7 @@ class LoadConfigTestCase(unittest.TestCase):
         self.assertIsNone(config["CLOUD_SYNC_INTERVAL_SECONDS"])
 
     def test_loads_the_cloud_connection_when_the_synchronization_is_enabled(self):
+        """Cloud settings are required and loaded when synchronization is enabled."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
 
@@ -168,6 +185,7 @@ class LoadConfigTestCase(unittest.TestCase):
         self.assertEqual(config["CLOUD_SYNC_INTERVAL_SECONDS"], 60)
 
     def test_rejects_an_incomplete_or_insecure_cloud_connection(self):
+        """Incomplete or insecure cloud settings raise ValueError."""
         enabled = {
             "CLOUD_SYNC_ENABLED": "true",
             "CLOUD_API_URL": "https://cloud.example",
@@ -191,6 +209,7 @@ class LoadConfigTestCase(unittest.TestCase):
                     load_config(root)
 
     def test_rejects_invalid_environment_boolean_and_port(self):
+        """Invalid environment, boolean, or port values raise ValueError."""
         for environ in (
             {"APP_ENV": "staging"},
             {"APP_ENV": "development", "DEBUG": "sometimes"},
