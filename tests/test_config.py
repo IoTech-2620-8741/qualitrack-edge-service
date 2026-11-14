@@ -90,6 +90,7 @@ class LoadConfigTestCase(unittest.TestCase):
             "https://user:secret@cloud.example",
             "https://cloud.example?token=secret",
             "https://cloud.example/#section",
+            "https://cloud.example:65536",
         )
 
         for url in invalid_urls:
