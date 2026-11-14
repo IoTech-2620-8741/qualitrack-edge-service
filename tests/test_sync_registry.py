@@ -34,7 +34,6 @@ class FakeResponse:
         return self._body
 
 
-
 class FakeCloudSession:
     def __init__(self, response):
         self.response = response
@@ -45,7 +44,6 @@ class FakeCloudSession:
     def request(self, method, path, json=None):
         self.requests.append((method, path))
         return self.answers.get(path, self.response)
-
 
 
 def equipment(**overrides):
@@ -66,7 +64,15 @@ def equipment(**overrides):
 
 
 class MonitoredDeviceTestCase(unittest.TestCase):
+    """Tests the MonitoredDevice entity built from the cloud registration.
+
+    The synchronization time is normalized to UTC, and invalid registrations
+    (blank identifier, wrong type, non-positive laboratory, non-integer
+    environment, naive time) are rejected.
+    """
+
     def test_normalizes_the_synchronization_time_to_utc(self):
+        """A synchronization time in another offset is normalized to UTC."""
         device = MonitoredDevice(
             "ENV-001", DeviceType.ENVIRONMENTAL_DEVICE, 7, None, 15, DeviceStatus.OPERATIONAL,
             datetime(2026, 11, 3, 7, 0, tzinfo=timezone(timedelta(hours=-5))),
@@ -76,6 +82,7 @@ class MonitoredDeviceTestCase(unittest.TestCase):
         self.assertFalse(device.is_in_environment)
 
     def test_rejects_invalid_cloud_registrations(self):
+        """Invalid identifiers, types, laboratories, environments or times are rejected."""
         for arguments in (
             (" ", DeviceType.ENVIRONMENTAL_DEVICE, 7, 2, 15, DeviceStatus.OPERATIONAL, NOW),
             ("ENV-001", "ENVIRONMENTAL_DEVICE", 7, 2, 15, DeviceStatus.OPERATIONAL, NOW),
@@ -88,7 +95,15 @@ class MonitoredDeviceTestCase(unittest.TestCase):
 
 
 class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
+    """Tests the translation of the cloud IoT device list into Edge devices.
+
+    Validates the route used, the skipping of retired or non-IoT equipment, and
+    that refusals, unexpected answers, and malformed lists raise
+    CloudRejectedError.
+    """
+
     def test_translates_the_iot_devices_of_the_gateway(self):
+        """Only active IoT devices become MonitoredDevices; retired ones are skipped."""
         session = FakeCloudSession(FakeResponse(200, [
             equipment(),
             equipment(id=16, environmentId=None, deviceType="CONTAINER_MONITOR",
@@ -112,6 +127,7 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
         self.assertEqual(container.status, DeviceStatus.MAINTENANCE)
 
     def test_reads_the_iot_devices_assigned_to_the_gateway(self):
+        """The registry reads exactly the devices the cloud assigns to the Gateway."""
         session = FakeCloudSession(FakeResponse(200, [
             equipment(),
             equipment(
@@ -129,6 +145,7 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
         self.assertEqual([(d.device_id, d.environment_id) for d in devices],[("ENV-001", 2), ("CNT-001", 2)])
 
     def test_gateway_refusal_stops_the_registry(self):
+        """403 raises CloudRejectedError and preserves the status code."""
         session = FakeCloudSession(FakeResponse(403))
 
         with self.assertRaises(CloudRejectedError) as raised:
@@ -137,6 +154,7 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 403)
 
     def test_reports_an_unexpected_answer(self):
+        """An unexpected status (e.g. 404) raises CloudRejectedError."""
         with self.assertRaises(CloudRejectedError):
             CloudDeviceRegistryGateway(FakeCloudSession(FakeResponse(404))).fetch_devices()
 
@@ -153,7 +171,10 @@ class CloudDeviceRegistryGatewayTestCase(unittest.TestCase):
 
 
 class IamAntiCorruptionLayerTestCase(unittest.TestCase):
+    """Tests the anti-corruption layer that reports the nodes registered in the Edge."""
+
     def test_reports_the_nodes_registered_in_this_edge_revoked_ones_included(self):
+        """The registered identifiers include the revoked nodes as well."""
         class FakeIamDevice:
             def __init__(self, device_id, revoked):
                 self.device_id = device_id
@@ -190,6 +211,13 @@ class FakeLayer:
 
 
 class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
+    """Tests the application service that mirrors the cloud registry locally.
+
+    Validates that the local copy is replaced only when the cloud answers, that
+    all cloud-authorized nodes are kept (even before enrollment), and that a
+    disabled synchronization or a malformed cloud answer preserve the local copy.
+    """
+
     @classmethod
     def setUpClass(cls):
         cls.app = create_app()
@@ -205,6 +233,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
         self.context.pop()
 
     def test_mirrors_the_cloud_registry_and_keeps_it_when_the_cloud_fails(self):
+        """The local copy follows the cloud and is kept when the cloud fails."""
         service = DeviceRegistryApplicationService(
             FakeRegistryGateway(
                 [monitored("ENV-001"), monitored("CNT-001", DeviceType.CONTAINER_MONITOR, None, 16)],
@@ -229,6 +258,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
         self.assertEqual([d.device_id for d in service.monitored_devices()], ["CNT-001"])
 
     def test_keeps_all_cloud_authorized_nodes_even_before_local_enrollment(self):
+        """All cloud-authorized nodes are kept, even before local enrollment."""
         service = DeviceRegistryApplicationService(
             FakeRegistryGateway([
                 monitored("ENV-001"),
@@ -253,6 +283,7 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
 
 
     def test_needs_a_gateway_to_synchronize(self):
+        """Without a cloud gateway, synchronization raises CloudSynchronizationDisabled."""
         with self.assertRaises(CloudSynchronizationDisabled):
             DeviceRegistryApplicationService(None, FakeLayer(), self.repository).synchronize_registry()
 
@@ -285,11 +316,19 @@ class DeviceRegistryApplicationServiceTestCase(unittest.TestCase):
 
 
 class CloudSyncSchedulerTestCase(unittest.TestCase):
+    """Tests the background thread that runs the synchronization tasks.
+
+    Validates that a failing task does not stop the others, that the cycle time
+    is logged and warns when it exceeds the interval, that the thread runs until
+    stopped, and that the outcome of the last cycle is kept.
+    """
+
     @classmethod
     def setUpClass(cls):
         cls.app = create_app()
 
     def test_runs_every_task_and_keeps_going_after_a_failure(self):
+        """A failing task does not stop the following ones."""
         failure = CloudUnavailableError("offline")
 
         def failing():
@@ -302,6 +341,7 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
         self.assertEqual(results["second"], 3)
 
     def test_logs_how_long_the_cycle_took_and_warns_when_it_exceeds_the_interval(self):
+        """The cycle time is logged, and a cycle over the interval warns."""
         clock = iter([0.0, 0.0, 0.5, 0.5, 2.5, 2.5])
         with patch("shared.infrastructure.cloud_sync_scheduler.time.monotonic", lambda: next(clock)), \
                 self.assertLogs("shared.infrastructure.cloud_sync_scheduler", "INFO") as logs:
@@ -311,6 +351,7 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
         self.assertIn("cycle took 2.5 s (registry 0.5 s, telemetry 2.0 s)", logs.output[-1])
 
     def test_background_thread_runs_until_stopped(self):
+        """The background thread runs its task and stops cleanly."""
         ran = threading.Event()
         scheduler = CloudSyncScheduler(60, [("task", ran.set)])
 
@@ -319,6 +360,7 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
         scheduler.stop(5)
 
     def test_keeps_when_the_last_cycle_ended_and_which_tasks_failed(self):
+        """The scheduler keeps the end time and the failed tasks of the last cycle."""
         finished_at = datetime(2026, 11, 14, 4, 0, tzinfo=UTC)
 
         def failing():
@@ -335,6 +377,7 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
         self.assertEqual(scheduler.last_cycle, CloudSyncCycle(finished_at, ("pending telemetry",)))
 
     def test_reports_whether_the_background_thread_is_running(self):
+        """The scheduler reports whether the background thread is running."""
         started_at = datetime(2026, 11, 14, 4, 0, tzinfo=UTC)
         scheduler = CloudSyncScheduler(60, [("task", lambda: None)], clock=lambda: started_at)
         self.assertFalse(scheduler.is_running)
@@ -349,6 +392,8 @@ class CloudSyncSchedulerTestCase(unittest.TestCase):
 
 
 class CloudCliTestCase(unittest.TestCase):
+    """Tests the `flask cloud` commands and the development enrollment route."""
+
     @classmethod
     def setUpClass(cls):
         cls.app = create_app()
@@ -357,12 +402,14 @@ class CloudCliTestCase(unittest.TestCase):
         self.runner = self.app.test_cli_runner()
 
     def test_sync_reports_that_the_synchronization_is_disabled(self):
+        """`cloud sync` fails when the synchronization is disabled."""
         result = self.runner.invoke(args=["cloud", "sync"])
 
         self.assertEqual(result.exit_code, 1)
         self.assertIn("CLOUD_SYNC_ENABLED=false", result.output)
 
     def test_lists_the_local_copy_of_the_registry(self):
+        """`cloud devices` lists the local copy of the cloud registry."""
         with self.app.app_context():
             MonitoredDeviceRepository().replace_all([monitored("CNT-001", DeviceType.CONTAINER_MONITOR, None, 16)])
         try:
@@ -378,6 +425,7 @@ class CloudCliTestCase(unittest.TestCase):
         )
 
     def test_enrolls_a_node_of_the_cached_registry_once(self):
+        """`POST /api/v1/devices/enroll` enrolls a cached node only once."""
         client = self.app.test_client()
         body = {"device_id": "ENV-ENROLL", "device_type": "ENVIRONMENTAL_DEVICE"}
         with self.app.app_context():

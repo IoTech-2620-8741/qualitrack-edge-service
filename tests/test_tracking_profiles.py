@@ -20,13 +20,22 @@ def profile(device_id="CNT-001", version=3, thresholds=(TEMPERATURE,), rules=(VE
 
 
 class ProfileDomainTestCase(unittest.TestCase):
+    """Tests the EnvironmentalProfile, Threshold and ActuationRule rules.
+
+    Validates that open sides are accepted, that invalid thresholds and rules
+    are rejected, and that a profile has one threshold per metric and its rules
+    refer to one of them.
+    """
+
     def test_accepts_open_sides_and_the_rules_of_the_cloud(self):
+        """Open sides are accepted and the cloud rules are preserved."""
         air = Threshold(Metric.AIR_QUALITY, "ppm", None, 800, None, 1200)
 
         self.assertEqual((air.normal_max, air.critical_max), (800.0, 1200.0))
         self.assertEqual(profile().actuation_rules, (VENTILATION,))
 
     def test_rejects_thresholds_the_cloud_would_reject(self):
+        """Invalid thresholds (metric, sides, order, NaN) are rejected."""
         for arguments in (
             (Metric.RFID_TAG, "tag", 1, 2, 0, 3),
             (Metric.TEMPERATURE, "°C", 15, 25, None, 30),
@@ -40,6 +49,7 @@ class ProfileDomainTestCase(unittest.TestCase):
                 Threshold(*arguments)
 
     def test_rejects_rules_that_do_not_start_a_response(self):
+        """A rule from NORMAL, an OFF action, or a metric without thresholds is rejected."""
         for arguments in (
             (Metric.TEMPERATURE, EnvironmentalState.NORMAL, ActuationAction.VENTILATION_ON),
             (Metric.TEMPERATURE, EnvironmentalState.WARNING, ActuationAction.VENTILATION_OFF),
@@ -49,6 +59,7 @@ class ProfileDomainTestCase(unittest.TestCase):
                 ActuationRule(*arguments)
 
     def test_a_profile_has_one_threshold_per_metric_and_rules_need_one(self):
+        """A profile has one threshold per metric, and its rules refer to one of them."""
         with self.assertRaisesRegex(ValueError, "one threshold per metric"):
             profile(thresholds=(TEMPERATURE, TEMPERATURE))
         with self.assertRaisesRegex(ValueError, "needs a threshold"):
@@ -75,7 +86,10 @@ class FakeLayer:
 
 
 class EnvironmentalProfileApplicationServiceTestCase(unittest.TestCase):
+    """Tests the use case that hands each node its own configuration."""
+
     def test_hands_each_node_its_own_configuration(self):
+        """Each node gets its own profile; bad credentials or a missing profile stop."""
         service = EnvironmentalProfileApplicationService(FakeLayer(), InMemoryProfiles(profile("CNT-002", version=1)))
 
         configuration = service.configuration_for("CNT-002", "secret")
@@ -89,6 +103,8 @@ class EnvironmentalProfileApplicationServiceTestCase(unittest.TestCase):
 
 
 class ConfigurationApiTestCase(unittest.TestCase):
+    """Tests the GET /api/v1/configurations/{deviceId} endpoint end to end."""
+
     @classmethod
     def setUpClass(cls):
         cls.app = create_app()
@@ -112,6 +128,7 @@ class ConfigurationApiTestCase(unittest.TestCase):
         return self.client.get(f"/api/v1/configurations/{device_id}", headers=headers)
 
     def test_hands_the_container_monitor_its_thresholds_and_rules(self):
+        """The monitor receives its thresholds, rules, versions and times."""
         response = self.get("CNT-CONF", self.container_key)
 
         self.assertEqual(response.status_code, 200)
@@ -127,6 +144,7 @@ class ConfigurationApiTestCase(unittest.TestCase):
         })
 
     def test_rejects_other_credentials_and_reports_a_missing_profile(self):
+        """Missing or wrong keys return 401; a node without profile returns 404."""
         self.assertEqual(self.get("CNT-CONF", None).status_code, 401)
         self.assertEqual(self.get("CNT-CONF", "test-only-key").status_code, 401)
         missing = self.get("ENV-001", "test-only-key")
@@ -134,6 +152,7 @@ class ConfigurationApiTestCase(unittest.TestCase):
         self.assertIn("no profile", missing.json["error"])
 
     def test_the_profiles_command_lists_the_local_copy(self):
+        """`cloud profiles` lists the local copy of the profiles."""
         result = self.app.test_cli_runner().invoke(args=["cloud", "profiles"])
 
         self.assertEqual(result.exit_code, 0, result.output)

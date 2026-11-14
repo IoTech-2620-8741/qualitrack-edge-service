@@ -11,7 +11,12 @@ NOW = datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
 
 
 class PendingRecordsRepositoryTestCase(unittest.TestCase):
-    """The pending records of the nodes the registry does not place are filtered in SQL."""
+    """The pending records of the nodes the registry does not place are filtered in SQL.
+
+    Validates that `find_pending` reads only the pending records of the given
+    nodes, that pagination by id works, and that `count_pending_outside` counts
+    the pending records of the other nodes in SQL.
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -32,6 +37,7 @@ class PendingRecordsRepositoryTestCase(unittest.TestCase):
         self.context.pop()
 
     def test_reads_only_the_pending_records_of_the_given_nodes(self):
+        """`find_pending` returns only the pending records of the given nodes, in id order."""
         first = self.repository.find_pending(0, 2, ["ENV-001", "ENV-002"])
         rest = self.repository.find_pending(first[-1].id, 2, ["ENV-001", "ENV-002"])
 
@@ -39,6 +45,7 @@ class PendingRecordsRepositoryTestCase(unittest.TestCase):
         self.assertEqual(self.repository.find_pending(0, 10, []), [])
 
     def test_counts_the_pending_records_of_the_other_nodes(self):
+        """`count_pending_outside` counts only the pending records of the other nodes."""
         self.assertEqual(self.repository.count_pending_outside(["ENV-001", "ENV-002"]), 2)
         self.assertEqual(self.repository.count_pending_outside([]), 5)
 

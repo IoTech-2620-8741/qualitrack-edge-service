@@ -31,11 +31,19 @@ class InMemoryDeviceRepository:
 
 
 class AuthApplicationServiceTestCase(unittest.TestCase):
+    """Tests the use cases that manage the identity of the nodes.
+
+    Validates registration with a random key kept only as a verifier, the
+    refusal of a duplicate registration, the effect of rotation and revocation
+    on the accepted key, and the listing of devices by identity.
+    """
+
     def setUp(self):
         self.repository = InMemoryDeviceRepository()
         self.service = AuthApplicationService(self.repository)
 
     def test_registers_device_with_a_random_key_kept_only_as_a_verifier(self):
+        """Each registration issues a random key, stored only as a verifier."""
         first = self.service.register_device("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)
         second = self.service.register_device("CNT-001", DeviceType.CONTAINER_MONITOR)
 
@@ -49,12 +57,14 @@ class AuthApplicationServiceTestCase(unittest.TestCase):
         )
 
     def test_rejects_a_second_registration_of_the_same_device(self):
+        """A second registration of the same device raises ValueError."""
         self.service.register_device("ENV-001", DeviceType.ENVIRONMENTAL_DEVICE)
 
         with self.assertRaisesRegex(ValueError, "already registered"):
             self.service.register_device("ENV-001", DeviceType.CONTAINER_MONITOR)
 
     def test_rotation_and_revocation_change_which_key_is_accepted(self):
+        """Rotation invalidates the old key, and revocation invalidates the new one."""
         issued = self.service.register_device("CNT-001", DeviceType.CONTAINER_MONITOR)
         rotated = self.service.rotate_api_key("CNT-001")
 
@@ -67,6 +77,7 @@ class AuthApplicationServiceTestCase(unittest.TestCase):
             self.service.rotate_api_key("CNT-001")
 
     def test_unknown_device_is_not_authenticated_nor_managed(self):
+        """An unknown device is not authenticated and cannot be managed."""
         self.assertIsNone(self.service.authenticated_device("CNT-404", "any-key"))
         for operation in (self.service.revoke_device, self.service.rotate_api_key):
             with self.subTest(operation=operation.__name__), self.assertRaisesRegex(
@@ -75,6 +86,7 @@ class AuthApplicationServiceTestCase(unittest.TestCase):
                 operation("CNT-404")
 
     def test_lists_devices_by_identity(self):
+        """The devices are listed ordered by their identifier."""
         self.service.register_device("ENV-002", DeviceType.ENVIRONMENTAL_DEVICE)
         self.service.register_device("CNT-001", DeviceType.CONTAINER_MONITOR)
 
