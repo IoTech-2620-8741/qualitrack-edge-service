@@ -139,7 +139,7 @@ def _cloud_settings(values: dict[str, str], environment_name: str) -> dict:
 
     try:
         parsed_url = urlsplit(url)
-        _ = parsed_url.port  # Valida que el puerto, si existe, sea correcto.
+        _ = parsed_url.port  # Reading the port validates it: a non-number or a value above 65535 raises ValueError.
     except ValueError as error:
         raise ValueError("CLOUD_API_URL must be a valid http or https URL") from error
 
