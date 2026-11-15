@@ -97,7 +97,8 @@ on them.
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended by**: ADR-0016, which keeps a SHA-256 verifier instead of PBKDF2
+- **Amended by**: ADR-0016, which keeps a SHA-256 verifier instead of PBKDF2;
+  ADR-0018, which also takes the key from `Authorization: Bearer`
 
 ### Context
 
@@ -673,3 +674,42 @@ of the Edge is not the behavior of any context:
   only for it.
 - Including the pending counts in the response, which adds a query of the
   largest tables to every check.
+
+## ADR-0018: Accept the API key of a node as a Bearer token
+
+- **Status**: Accepted
+- **Date**: 2026-11-15
+- **Amends**: ADR-0003
+
+### Context
+
+The nodes are built on the Modest IoT Nano Framework of the course, whose
+`HttpGatewayClient` sends requests with only two headers: `Content-Type` and
+`Authorization`, with any value. The Edge read the API key of a node only from
+`X-API-Key`, so every node needed its own HTTP client to reach it, outside the
+framework.
+
+### Decision
+
+The sign-in, the readings, the actions and the configuration take the key from
+`X-API-Key` or, when that header is missing, from `Authorization: Bearer <key>`.
+Any other `Authorization` scheme, or an empty token, counts as a missing key.
+When both headers arrive, `X-API-Key` wins. The key is checked in the same way
+whichever header brings it.
+
+### Consequences
+
+- A node calls `setAuthorizationHeader("Bearer <key>")` on the framework's
+  `HttpGatewayClient` and needs no client of its own.
+- Nodes and tools that send `X-API-Key` keep working unchanged.
+- The error for a request without a key stays `Missing X-API-Key`, so clients
+  that read it do not change.
+
+### Alternatives considered
+
+- A node-specific HTTP client in each firmware, which the course asks to avoid
+  when the framework already covers the case.
+- Changing the framework to add custom headers, which would leave the nodes on
+  a copy of the framework instead of the one in the Arduino Library Manager.
+- Accepting only `Authorization`, which would break the nodes and scripts that
+  already send `X-API-Key`.

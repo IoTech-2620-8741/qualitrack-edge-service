@@ -200,6 +200,16 @@ class TelemetryApiTestCase(unittest.TestCase):
                                    {"measured_at": self.at(60), "air_quality": 400}, "test-only-key")
         self.assertEqual(missing_device.status_code, 401)
 
+
+    def test_accepts_the_api_key_as_a_bearer_token(self):
+        """A reading sent with ``Authorization: Bearer <key>`` is stored like one with ``X-API-Key``."""
+        body = {"device_id": "ENV-001", "measured_at": self.at(41), "air_quality": 433.0}
+
+        response = self.client.post("/api/v1/monitoring/environment-readings", json=body,
+                                    headers={"Authorization": "Bearer test-only-key"})
+
+        self.assertEqual(response.status_code, 201)
+
     def test_rejects_invalid_readings(self):
         """Invalid readings return 400; a non-JSON request returns 415."""
         for body in (

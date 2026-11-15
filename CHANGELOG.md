@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- IAM (iam) and Tracking (tracking): the nodes may send their API key as `Authorization: Bearer <key>` when they do not send `X-API-Key`, so a node built on the Modest IoT Nano Framework reaches the Edge with its `HttpGatewayClient`. `X-API-Key` still works and wins when both arrive; another scheme or an empty token is a missing key (ADR-0018).
 - Shared (shared): `GET /api/v1/health` reports whether the Edge can serve the nodes. It answers `503` with `unavailable` when the SQLite database cannot be read, and `200` with `ok`, or with `degraded` while the cloud synchronization fails, stops or ends no cycle in three intervals; the nodes are still served then. It needs no API key and shows no identifiers, keys or error messages. `CloudSyncScheduler` keeps the outcome of its last cycle for it (ADR-0017).
 - The Docker image checks `GET /api/v1/health` every 30 seconds, so `docker compose ps` shows the container as `healthy` or `unhealthy`; the CI waits on the endpoint and on that state instead of expecting a `401` from the sign-in (ADR-0017).
 
