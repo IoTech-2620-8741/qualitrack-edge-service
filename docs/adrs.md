@@ -25,7 +25,8 @@ Each record includes:
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
-- **Amended by**: ADR-0015, which moves the cloud synchronization to the Sync context
+- **Amended by**: ADR-0015, which moves the cloud synchronization to the Sync context;
+  ADR-0017, which gives Shared an interfaces layer for the health of the Edge
 
 ### Context
 
@@ -96,6 +97,8 @@ on them.
 
 - **Status**: Accepted
 - **Date**: 2026-11-03
+- **Amended by**: ADR-0016, which keeps a SHA-256 verifier instead of PBKDF2;
+  ADR-0018, which also takes the key from `Authorization: Bearer`
 
 ### Context
 
@@ -573,3 +576,140 @@ do not change.
 - Moving the cloud registry to IAM, which ADR-0006 already rejected.
 - Evaluating the thresholds in the Edge, which the report leaves to the cloud
   and to the nodes (ADR-0001).
+
+## ADR-0016: Verify the API keys of the nodes with SHA-256
+
+- **Status**: Accepted
+- **Date**: 2026-11-13
+- **Amends**: ADR-0003
+
+### Context
+
+The Edge checks the API key of a node on every reading, action and
+configuration request (ADR-0003). It kept a PBKDF2 verifier with 310,000
+iterations, which costs about 50 ms on a desktop computer and several times
+more on the Raspberry Pi. With 15 nodes sending every 10 seconds
+(ADR-0012) that is a constant load on the four Gunicorn threads, and anyone on
+the local network who knows a `device_id` can call `POST /api/v1/auth/sign-in`
+in a loop to keep them busy. A slow, salted hash protects secrets that can be
+guessed; the Edge generates every key with 256 random bits
+(`flask devices register`, `rotate-key` and the enrollment).
+
+### Decision
+
+New verifiers are the SHA-256 digest of the key, stored as `sha256$<digest>`
+and compared in constant time. A verifier stored before as
+`pbkdf2_sha256$...` is still read and accepted, so no node has to be
+registered again; `flask devices rotate-key` replaces it with a SHA-256 one.
+
+### Consequences
+
+- Checking a key costs microseconds, so the requests of the nodes and the
+  sign-in no longer compete for the CPU of the Raspberry Pi.
+- The development `TEST_DEVICE_API_KEY` is chosen by hand and gets no
+  stretching; it must stay out of production, as the configuration already
+  requires.
+- Nodes registered before keep the PBKDF2 cost until their key is rotated.
+
+### Alternatives considered
+
+- Fewer PBKDF2 iterations, which keeps a cost that buys nothing for random
+  keys.
+- Rate limiting the sign-in, which needs shared state between the Gunicorn
+  threads and does not lower the cost of the legitimate requests.
+- Upgrading the verifier on the next successful sign-in, which writes to the
+  database in the authentication path.
+
+## ADR-0017: Report the health of the Edge at GET /api/v1/health
+
+- **Status**: Accepted
+- **Date**: 2026-11-14
+- **Amends**: ADR-0001
+
+### Context
+
+The local station runs unattended. Docker restarts the container when
+Gunicorn exits, but it cannot tell a process that runs from one that works,
+and the CI waited for the service by expecting a `401` from the sign-in. The
+Edge must keep serving the nodes while the cloud is unreachable (ADR-0007), so
+a cloud outage is not a failure of the station, but the technicians need to
+see it.
+
+### Decision
+
+`GET /api/v1/health`, in a new interfaces layer of Shared, because the health
+of the Edge is not the behavior of any context:
+
+- `EdgeHealthCheck` reads the schema of the SQLite database and the last cycle
+  that `CloudSyncScheduler` keeps in memory: when it ended and which tasks
+  failed. It runs no counts.
+- The status is `unavailable` with `503` when the database cannot be read;
+  `degraded` with `200` when the synchronization is enabled and its last cycle
+  had a failed task, its thread stopped, or no cycle ended in three
+  intervals; `ok` with `200` otherwise.
+- It needs no API key and answers states and one time, never identifiers,
+  keys or error messages.
+- The image declares a `HEALTHCHECK` that calls it every 30 seconds with the
+  Python of the image, which has no curl; the CI waits on it.
+
+### Consequences
+
+- `docker compose ps` shows whether the Edge works, and the CI checks the
+  same thing the station does.
+- A cloud outage keeps the container healthy; only the response shows it.
+- Docker does not restart an unhealthy container by itself, so the status
+  reports a broken database but does not repair it.
+- Gunicorn logs each check, about 2,900 lines a day, within the 30 MB of logs
+  that `docker-compose.yml` keeps.
+- The pending records stay in `flask cloud pending`, because counting them
+  every 30 seconds would scan the telemetry tables on the Raspberry Pi.
+
+### Alternatives considered
+
+- Answering `503` while the cloud fails, which would mark the station
+  unhealthy during the outages it is built to survive.
+- Requiring an API key, which Docker would need to keep in the image or its
+  settings.
+- Installing curl in the image for the `HEALTHCHECK`, which adds a package
+  only for it.
+- Including the pending counts in the response, which adds a query of the
+  largest tables to every check.
+
+## ADR-0018: Accept the API key of a node as a Bearer token
+
+- **Status**: Accepted
+- **Date**: 2026-11-15
+- **Amends**: ADR-0003
+
+### Context
+
+The nodes are built on the Modest IoT Nano Framework of the course, whose
+`HttpGatewayClient` sends requests with only two headers: `Content-Type` and
+`Authorization`, with any value. The Edge read the API key of a node only from
+`X-API-Key`, so every node needed its own HTTP client to reach it, outside the
+framework.
+
+### Decision
+
+The sign-in, the readings, the actions and the configuration take the key from
+`X-API-Key` or, when that header is missing, from `Authorization: Bearer <key>`.
+Any other `Authorization` scheme, or an empty token, counts as a missing key.
+When both headers arrive, `X-API-Key` wins. The key is checked in the same way
+whichever header brings it.
+
+### Consequences
+
+- A node calls `setAuthorizationHeader("Bearer <key>")` on the framework's
+  `HttpGatewayClient` and needs no client of its own.
+- Nodes and tools that send `X-API-Key` keep working unchanged.
+- The error for a request without a key stays `Missing X-API-Key`, so clients
+  that read it do not change.
+
+### Alternatives considered
+
+- A node-specific HTTP client in each firmware, which the course asks to avoid
+  when the framework already covers the case.
+- Changing the framework to add custom headers, which would leave the nodes on
+  a copy of the framework instead of the one in the Arduino Library Manager.
+- Accepting only `Authorization`, which would break the nodes and scripts that
+  already send `X-API-Key`.

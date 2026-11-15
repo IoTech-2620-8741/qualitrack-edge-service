@@ -18,8 +18,9 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m unittest -v
 
-  # Runs the docker-compose.yml of the local station: Gunicorn, the devices
-  # commands, the reception of a reading and the qualitrack-data volume.
+  # Runs the docker-compose.yml of the local station: Gunicorn, the health
+  # check, the devices commands, the reception of a reading and the
+  # qualitrack-data volume.
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -35,15 +36,15 @@ jobs:
           url=http://localhost:5000/api/v1
           wait_for_edge() {
             for attempt in $(seq 1 30); do
-              status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/auth/sign-in" \
-                -H 'Content-Type: application/json' -d '{"device_id":"CNT-001"}' || true)
-              [ "$status" = "401" ] && return 0
+              status=$(curl -s -o /dev/null -w '%{http_code}' "$url/health" || true)
+              [ "$status" = "200" ] && return 0
               sleep 1
             done
             docker compose logs qualitrack-edge
             return 1
           }
           wait_for_edge
+          curl -s "$url/health" | python3 -c 'import json, sys; assert json.load(sys.stdin)["status"] == "ok"'
           key=$(docker compose exec -T qualitrack-edge flask --app app devices register CNT-001 CONTAINER_MONITOR \
             | tail -n 1 | sed 's/.*: //')
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$url/auth/sign-in" \
@@ -59,6 +60,14 @@ jobs:
             -H 'Content-Type: application/json' -H "X-API-Key: $key" -d '{"device_id":"CNT-001"}')" = 200
           docker compose exec -T qualitrack-edge flask --app app cloud pending | tee pending.txt
           grep -q 'Readings: PENDING 1' pending.txt
+          # Docker runs the HEALTHCHECK of the image every 30 seconds (ADR-0017).
+          container=$(docker compose ps -q qualitrack-edge)
+          for attempt in $(seq 1 45); do
+            health=$(docker inspect --format '{{.State.Health.Status}}' "$container")
+            [ "$health" = "healthy" ] && break
+            sleep 2
+          done
+          test "$health" = "healthy"
       - name: Stop the service
         if: always()
         run: docker compose down -v

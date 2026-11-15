@@ -1,4 +1,3 @@
-
 import unittest
 
 import requests
@@ -37,6 +36,14 @@ class FakeHttpClient:
 
 
 class CloudSessionTestCase(unittest.TestCase):
+    """Tests the authenticated session with the QualiTrack Cloud REST API.
+
+    Validates that the API key travels in the X-API-Key header on every request,
+    that rejected credentials raise CloudRejectedError, that unreachable or
+    failing clouds raise CloudUnavailableError, and that other client errors are
+    returned to the gateway.
+    """
+
     def session(self, *responses):
         self.http = FakeHttpClient(*responses)
 
@@ -48,6 +55,7 @@ class CloudSessionTestCase(unittest.TestCase):
         )
 
     def test_sends_api_key_on_every_request_without_sign_in(self):
+        """The API key is sent in X-API-Key on every request, with no sign-in."""
         session = self.session(
             FakeResponse(200, []),
             FakeResponse(200, []),
@@ -74,6 +82,7 @@ class CloudSessionTestCase(unittest.TestCase):
             self.assertGreater(kwargs["timeout"], 0)
 
     def test_rejects_invalid_or_forbidden_gateway_credentials(self):
+        """401 and 403 raise CloudRejectedError with the original status code."""
         for status, message in (
             (401, "Invalid Edge Gateway credentials"),
             (403, "Edge Gateway is not authorized"),
@@ -90,6 +99,7 @@ class CloudSessionTestCase(unittest.TestCase):
                 self.assertEqual(len(self.http.calls), 1)
 
     def test_reports_an_unreachable_or_failing_cloud(self):
+        """Connection errors, timeouts, and 503 raise CloudUnavailableError."""
         for response in (
             requests.ConnectionError("offline"),
             requests.Timeout("slow"),
@@ -102,6 +112,7 @@ class CloudSessionTestCase(unittest.TestCase):
                     session.request("GET", "/api/v1/any")
 
     def test_returns_other_client_errors_to_the_gateway(self):
+        """400 and other client errors are returned, not raised."""
         session = self.session(
             FakeResponse(400, {"message": "Invalid reading"})
         )
@@ -115,6 +126,7 @@ class CloudSessionTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_requires_gateway_credentials(self):
+        """A blank device ID or API key raises ValueError."""
         with self.assertRaisesRegex(ValueError, "device ID"):
             CloudSession(
                 "https://cloud.example",

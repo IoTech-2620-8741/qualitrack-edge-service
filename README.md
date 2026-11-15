@@ -17,10 +17,11 @@ The QualiTrack nodes are:
 
 - **Implemented**
   - sign-in of the environmental device and the container monitor with their
-    `device_id` and `X-API-Key` at `POST /api/v1/auth/sign-in` (TS53, TS54)
+    `device_id` and `X-API-Key` (or `Authorization: Bearer`) at `POST /api/v1/auth/sign-in` (TS53, TS54)
   - `flask devices` commands to register the nodes with a random API key,
     rotate their key, revoke them and list them
-  - API keys stored as salted PBKDF2 verifiers
+  - API keys stored as SHA-256 verifiers; a key stored before with PBKDF2
+    keeps working until it is rotated (ADR-0016)
   - optional registration of a development test node
   - enrollment of a node the cloud assigns to this Edge at
     `POST /api/v1/devices/enroll`, in development only
@@ -44,6 +45,8 @@ The QualiTrack nodes are:
   - SQLite persistence through Peewee
   - deployment on the local station with Docker Compose and Gunicorn, with the
     database in the `qualitrack-data` volume (report 4.1.3.4)
+  - health of the Edge at `GET /api/v1/health`, which Docker checks every 30
+    seconds (ADR-0017)
 
 These cover the Edge stories of the QualiTrack Report (epic EP07, TS53–TS64).
 
@@ -93,7 +96,8 @@ of Tracking directly, and Tracking does not depend on it (ADR-0015).
 
 Infrastructure shared by the bounded contexts: the SQLite database, the
 authenticated session with the cloud and the background synchronization
-thread.
+thread. Its interfaces layer reports the health of the Edge at
+`GET /api/v1/health` (ADR-0017).
 
 ## Layered Architecture
 
@@ -135,7 +139,8 @@ qualitrack-edge-service/
 │   ├── infrastructure/
 │   └── interfaces/
 ├── shared/
-│   └── infrastructure/
+│   ├── infrastructure/
+│   └── interfaces/      # GET /api/v1/health
 ├── docs/                # technical stories, class diagram, ADRs
 └── tests/
 ```
@@ -259,17 +264,17 @@ flask --app app cloud profiles
    profile in the cloud has none in the Edge. The copy changes only when every
    profile was read, so the nodes keep the last one while the cloud is
    unreachable. `cloud profiles` lists it.
-3. It sends the pending readings and actions, oldest first, to the cloud route
-   of their node (`/edge-gateways/{deviceId}/iot-devices/{id}/telemetry-measurements`,
+3. It sends the pending readings and actions, oldest first and four at a
+   time, to the cloud route of their node (`/edge-gateways/{deviceId}/iot-devices/{id}/telemetry-measurements`,
    and `.../actuation-events` for the actions of a container monitor).
    - `201` or `200` (the cloud already had it): the record becomes `SYNCED`.
    - `400`, `404`, `409` or `422`: the cloud refuses it for good, so it becomes
      `REJECTED` and the reason is logged.
    - A node the registry does not place in an environment yet: its records
-     stay `PENDING` until it is.
+     stay `PENDING` until it is; they are counted, not read.
    - Cloud not reachable, a server error or a rejected API key: the
-     synchronization stops, the records keep their state and the next cycle
-     retries them.
+     synchronization stops once the four records in flight are answered, the
+     records keep their state and the next cycle retries them.
 4. It deletes the records that became `SYNCED` more than
    `SYNCED_RETENTION_DAYS` ago and the `REJECTED` ones older than
    `REJECTED_RETENTION_DAYS`, counted from the moment the Edge received them.
@@ -343,7 +348,10 @@ docker compose logs -f qualitrack-edge
 ```
 
 The Edge listens on port `5000` of the station; the nodes use
-`http://<station address>:5000/api/v1`.
+`http://<station address>:5000/api/v1`. Docker checks
+`GET /api/v1/health` every 30 seconds: `docker compose ps` shows the container
+as `healthy`, or `unhealthy` when the database cannot be read. Docker does not
+restart an unhealthy container by itself; check `docker compose logs`.
 
 ### 3. Register the nodes and check the cloud
 
@@ -366,9 +374,45 @@ docker compose up -d --build
 `docker compose down` stops the service and keeps the volume; only
 `docker compose down -v` deletes the database. The CI builds the image for
 `linux/arm64`, the architecture of the Raspberry Pi 4, and runs the compose
-file to check the service, the commands and the volume.
+file to check the service, its health check, the commands and the volume.
 
 ## API Contract
+
+### Check the health of the Edge
+
+`GET /api/v1/health`
+
+Needs no API key, so Docker and a technician of the local network can call
+it; it shows no identifiers, keys or error messages (ADR-0017). The Edge is
+`ok` while its database answers. A cloud synchronization that failed in its
+last cycle, stopped, or ended no cycle in three intervals makes it
+`degraded`, while the nodes are still served and their records stay
+`PENDING`.
+
+| Response | When |
+|---|---|
+| `200 OK` | `status` is `ok` or `degraded` |
+| `503 Service Unavailable` | `status` is `unavailable`: the database cannot be read |
+
+```json
+{
+  "status": "degraded",
+  "database": "ok",
+  "cloud_sync": {
+    "enabled": true,
+    "running": true,
+    "last_cycle_at": "2026-11-14T04:00:00Z",
+    "failed_tasks": ["pending telemetry"],
+    "behind": false
+  }
+}
+```
+
+`failed_tasks` names the tasks of the last cycle that failed: `device
+registry`, `environmental profiles`, `pending telemetry` or `telemetry purge`;
+`docker compose logs` has the reason. While `CLOUD_SYNC_ENABLED` is `false`,
+`cloud_sync` is `{"enabled": false}`. `flask --app app cloud pending` counts
+the pending records, which the check leaves out so that it stays cheap.
 
 ### Sign in a node
 
@@ -380,7 +424,7 @@ active, and presents its matching API key (TS53, TS54).
 #### Required headers
 
 - `Content-Type: application/json`
-- `X-API-Key: <node api key>`
+- `X-API-Key: <node api key>`, or `Authorization: Bearer <node api key>` (ADR-0018)
 
 #### Request body
 
@@ -446,8 +490,9 @@ Header: `Content-Type: application/json`.
 
 The three endpoints below share these rules:
 
-- Headers: `Content-Type: application/json` and `X-API-Key: <node api key>`;
-  the body carries the `device_id` of the node.
+- Headers: `Content-Type: application/json` and `X-API-Key: <node api key>`
+  (or `Authorization: Bearer <node api key>`, ADR-0018); the body carries the
+  `device_id` of the node.
 - Times are ISO 8601 with an offset, supplied by the node and normalized to
   UTC. They cannot be more than 5 minutes in the future, as in the cloud.
 - `profile_version` (optional) is the version of the environmental profile the
@@ -550,7 +595,7 @@ The response is the stored action with its `id` and `sync_status`.
 
 `GET /api/v1/configurations/{deviceId}`
 
-Header: `X-API-Key: <node api key>`. The node reads its own configuration: the
+Header: `X-API-Key: <node api key>` (or `Authorization: Bearer <node api key>`). The node reads its own configuration: the
 profile of its environment for the environmental device, or its own profile
 for a container monitor, as the Edge last copied it from the cloud. The node
 applies the thresholds and rules and sends `profile_version` back with its

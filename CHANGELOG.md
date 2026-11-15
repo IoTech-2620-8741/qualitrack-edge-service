@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
+### Added
+
+- IAM (iam) and Tracking (tracking): the nodes may send their API key as `Authorization: Bearer <key>` when they do not send `X-API-Key`, so a node built on the Modest IoT Nano Framework reaches the Edge with its `HttpGatewayClient`. `X-API-Key` still works and wins when both arrive; another scheme or an empty token is a missing key (ADR-0018).
+- Shared (shared): `GET /api/v1/health` reports whether the Edge can serve the nodes. It answers `503` with `unavailable` when the SQLite database cannot be read, and `200` with `ok`, or with `degraded` while the cloud synchronization fails, stops or ends no cycle in three intervals; the nodes are still served then. It needs no API key and shows no identifiers, keys or error messages. `CloudSyncScheduler` keeps the outcome of its last cycle for it (ADR-0017).
+- The Docker image checks `GET /api/v1/health` every 30 seconds, so `docker compose ps` shows the container as `healthy` or `unhealthy`; the CI waits on the endpoint and on that state instead of expecting a `401` from the sign-in (ADR-0017).
+
+### Changed
+
+- Sync (sync): the pending readings and actions are sent four at a time instead of one by one, so the Edge keeps up with 15 nodes when the cloud is slow; an outage still stops the synchronization once the records in flight are answered. The records of nodes the registry does not place in an environment are filtered and counted in SQL instead of being read on every cycle.
+- Shared (shared): the background synchronization logs how long each cycle and each task took, and warns when a cycle takes longer than `CLOUD_SYNC_INTERVAL_SECONDS`.
+- IAM (iam): new API keys are kept as a SHA-256 verifier instead of PBKDF2, so checking the key of a node no longer takes tens of milliseconds of the Raspberry Pi on every request. Verifiers stored before keep working; `flask devices rotate-key` replaces them (ADR-0016).
+- Sync (sync): `DeviceRegistryApplicationService` requires its repository from `create_app`, as the other Sync services do (ADR-0015).
+- IAM (iam) and Sync (sync): a second registration or enrollment of the same node is refused only by the primary key of the devices table; the lookups made before the insert, which it already covered, are removed. `flask devices register` still answers "already registered" and `POST /api/v1/devices/enroll` still answers `409` (#32).
+
+### Fixed
+
+- IAM (iam): two registrations of the same node at the same time, for example `flask devices register` and `POST /api/v1/devices/enroll`, no longer both answer "Registered" with only the last key working; the second one fails with "already registered".
+- Sync (sync): the profile read from the cloud is parsed once.
+- Settings: `CLOUD_API_URL` must be an http or https URL with a host and a valid port, and without a user, password, query or fragment; any other value stops the start with "CLOUD_API_URL must be a valid http or https URL" (#34).
+
+### Removed
+
+- `DeviceRegistryApplicationService.find_monitored_device` and `AuthApplicationService.authenticate`, which only the tests used.
+
 ## [0.3.1] - 2026-11-13
 
 ### Changed

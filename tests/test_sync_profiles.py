@@ -48,7 +48,15 @@ def container_profile_resource(**overrides):
 
 
 class CloudProfileGatewayTestCase(unittest.TestCase):
+    """Tests the translation of a cloud profile into an Edge profile.
+
+    Validates the route used, the normalization of the update time to UTC, and
+    that a missing profile returns None while a malformed one raises
+    CloudRejectedError.
+    """
+
     def test_translates_the_profile_the_node_applies(self):
+        """The cloud resource becomes the profile the node applies."""
         session = FakeCloudSession(FakeResponse(200, container_profile_resource()))
 
         read = CloudProfileGateway(session).fetch_profile(placed("CNT-001"))
@@ -61,6 +69,7 @@ class CloudProfileGatewayTestCase(unittest.TestCase):
         self.assertEqual(read.cloud_updated_at, datetime(2026, 11, 3, 14, 0, tzinfo=UTC))
 
     def test_a_node_without_profile_has_none_and_other_answers_stop(self):
+        """404 returns None; a bad answer or a malformed rule raises CloudRejectedError."""
         self.assertIsNone(CloudProfileGateway(FakeCloudSession(FakeResponse(404))).fetch_profile(placed("CNT-001")))
         for response in (
             FakeResponse(400, {"message": "Bad request"}),
@@ -93,6 +102,13 @@ class InMemoryDevices:
 
 
 class ProfileSynchronizationApplicationServiceTestCase(unittest.TestCase):
+    """Tests the synchronization of the cloud profiles to the local copy.
+
+    Validates that only placed nodes are read, that the local copy is replaced
+    only when the cloud answered, and that synchronization without a connection
+    raises CloudSynchronizationDisabled.
+    """
+
     def setUp(self):
         self.devices = InMemoryDevices(
             placed("CNT-001"), placed("CNT-002", cloud_device_id=17), placed("CNT-003", environment_id=None)
@@ -103,6 +119,7 @@ class ProfileSynchronizationApplicationServiceTestCase(unittest.TestCase):
         return ProfileSynchronizationApplicationService(gateway, self.devices, self.repository)
 
     def test_copies_the_profiles_of_placed_nodes_and_drops_the_rest(self):
+        """Only placed nodes are read, and the rest is dropped from the copy."""
         gateway = FakeProfileGateway({"CNT-001": profile("CNT-001", version=4)})
 
         copied = self.service(gateway).synchronize_profiles()
@@ -112,12 +129,14 @@ class ProfileSynchronizationApplicationServiceTestCase(unittest.TestCase):
         self.assertEqual([p.device_id for p in self.repository.find_all()], ["CNT-001"])
 
     def test_keeps_the_previous_copy_when_the_cloud_fails(self):
+        """A failed synchronization keeps the previous copy of the profiles."""
         with self.assertRaises(CloudUnavailableError):
             self.service(FakeProfileGateway({}, fail=True)).synchronize_profiles()
 
         self.assertEqual([p.device_id for p in self.repository.find_all()], ["CNT-002", "CNT-OLD"])
 
     def test_does_not_synchronize_without_a_cloud_connection(self):
+        """Without a cloud gateway, synchronization raises CloudSynchronizationDisabled."""
         with self.assertRaises(CloudSynchronizationDisabled):
             self.service(None).synchronize_profiles()
 

@@ -1,4 +1,11 @@
-"""Domain value object for device API credentials."""
+"""Domain value object for device API credentials.
+
+The Edge generates every API key with 256 random bits, so a fast SHA-256
+digest is enough to keep the key out of the database: a slow, salted hash only
+protects guessable secrets, and on the Raspberry Pi it costs every request of
+every node (ADR-0016). Verifiers stored with PBKDF2 before keep working until
+the key of the node is rotated.
+"""
 
 import base64
 import hashlib
@@ -6,25 +13,45 @@ import hmac
 import secrets
 from dataclasses import dataclass, field
 
-
-_SCHEME = "pbkdf2_sha256"
-_ITERATIONS = 310_000
+_SHA256_SCHEME = "sha256"
+_PBKDF2_SCHEME = "pbkdf2_sha256"
+_MIN_ITERATIONS = 100_000
 _MAX_ITERATIONS = 1_000_000
 _GENERATED_SECRET_BYTES = 32
 
 
+def _b64encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _b64decode(value: str) -> bytes:
+    return base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+
+
+def _sha256(secret: str) -> bytes:
+    return hashlib.sha256(secret.encode("utf-8")).digest()
+
+
 @dataclass(frozen=True, repr=False)
 class ApiCredential:
-    """A one-way verifier for a device API key."""
+    """A one-way verifier for a device API key.
 
-    _salt: bytes = field(repr=False)
+    New verifiers are a SHA-256 digest of the key. A verifier stored with
+    PBKDF2 (``_salt`` and ``_iterations`` set) is still accepted.
+    """
+
     _digest: bytes = field(repr=False)
-    _iterations: int = field(default=_ITERATIONS, repr=False)
+    _salt: bytes | None = field(default=None, repr=False)
+    _iterations: int | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        if len(self._salt) != 16 or len(self._digest) != 32:
+        if len(self._digest) != 32:
             raise ValueError("Invalid API key verifier material")
-        if not 100_000 <= self._iterations <= _MAX_ITERATIONS:
+        if self._salt is None and self._iterations is None:
+            return
+        if self._salt is None or len(self._salt) != 16:
+            raise ValueError("Invalid API key verifier material")
+        if self._iterations is None or not _MIN_ITERATIONS <= self._iterations <= _MAX_ITERATIONS:
             raise ValueError("Invalid API key verifier work factor")
 
     @staticmethod
@@ -34,30 +61,21 @@ class ApiCredential:
 
     @classmethod
     def create(cls, secret: str) -> "ApiCredential":
-        """Create a salted verifier from a non-empty device secret."""
+        """Create the SHA-256 verifier of a non-empty device secret."""
         if not isinstance(secret, str) or not secret:
             raise ValueError("API key cannot be empty")
-        salt = secrets.token_bytes(16)
-        digest = hashlib.pbkdf2_hmac(
-            "sha256", secret.encode("utf-8"), salt, _ITERATIONS
-        )
-        return cls(salt, digest, _ITERATIONS)
+        return cls(_sha256(secret))
 
     @classmethod
     def from_encoded(cls, encoded: str) -> "ApiCredential":
         """Reconstitute a credential verifier from its persisted form."""
         try:
-            scheme, iterations, salt, digest = encoded.split("$")
-            count = int(iterations)
-            if scheme != _SCHEME or not 100_000 <= count <= _MAX_ITERATIONS:
-                raise ValueError
-            return cls(
-                base64.b64decode(salt + "=" * (-len(salt) % 4), altchars=b"-_", validate=True),
-                base64.b64decode(
-                    digest + "=" * (-len(digest) % 4), altchars=b"-_", validate=True
-                ),
-                count,
-            )
+            parts = encoded.split("$")
+            if parts[0] == _SHA256_SCHEME and len(parts) == 2:
+                return cls(_b64decode(parts[1]))
+            if parts[0] == _PBKDF2_SCHEME and len(parts) == 4:
+                return cls(_b64decode(parts[3]), _b64decode(parts[2]), int(parts[1]))
+            raise ValueError
         except (AttributeError, TypeError, ValueError) as error:
             raise ValueError("Invalid stored API key verifier") from error
 
@@ -65,13 +83,16 @@ class ApiCredential:
         """Compare a presented API key with this verifier in constant time."""
         if not isinstance(secret, str) or not secret:
             return False
-        candidate = hashlib.pbkdf2_hmac(
-            "sha256", secret.encode("utf-8"), self._salt, self._iterations
-        )
+        if self._salt is None:
+            candidate = _sha256(secret)
+        else:
+            candidate = hashlib.pbkdf2_hmac(
+                "sha256", secret.encode("utf-8"), self._salt, self._iterations
+            )
         return hmac.compare_digest(candidate, self._digest)
 
     def encode(self) -> str:
         """Return the versioned verifier representation for persistence."""
-        salt = base64.urlsafe_b64encode(self._salt).decode("ascii").rstrip("=")
-        digest = base64.urlsafe_b64encode(self._digest).decode("ascii").rstrip("=")
-        return f"{_SCHEME}${self._iterations}${salt}${digest}"
+        if self._salt is None:
+            return f"{_SHA256_SCHEME}${_b64encode(self._digest)}"
+        return f"{_PBKDF2_SCHEME}${self._iterations}${_b64encode(self._salt)}${_b64encode(self._digest)}"

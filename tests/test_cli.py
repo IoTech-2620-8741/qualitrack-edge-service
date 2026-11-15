@@ -4,6 +4,13 @@ from app import create_app
 
 
 class DevicesCliTestCase(unittest.TestCase):
+    """Tests the `flask devices` commands and their effect on authentication.
+
+    Validates registration, duplicate detection, key rotation, revocation, and
+    the list command, including how the API key is shown only once and how the
+    device can sign in afterward.
+    """
+
     @classmethod
     def setUpClass(cls):
         cls.app = create_app()
@@ -28,6 +35,7 @@ class DevicesCliTestCase(unittest.TestCase):
         return result.output.strip().splitlines()[-1].rsplit(": ", 1)[1]
 
     def test_registered_container_monitor_signs_in_with_the_key_shown_once(self):
+        """The registered monitor signs in with the key printed by the command."""
         result = self.invoke("register", "CNT-001", "CONTAINER_MONITOR")
 
         self.assertEqual(result.exit_code, 0, result.output)
@@ -37,6 +45,7 @@ class DevicesCliTestCase(unittest.TestCase):
         self.assertEqual(response.json["device_type"], "CONTAINER_MONITOR")
 
     def test_rejects_duplicate_registration_and_unknown_type(self):
+        """Duplicate registration fails with exit code 1; unknown type with 2."""
         self.assertEqual(self.invoke("register", "ENV-002", "ENVIRONMENTAL_DEVICE").exit_code, 0)
 
         duplicate = self.invoke("register", "ENV-002", "ENVIRONMENTAL_DEVICE")
@@ -47,6 +56,7 @@ class DevicesCliTestCase(unittest.TestCase):
         self.assertEqual(unknown_type.exit_code, 2)
 
     def test_rotated_key_replaces_the_previous_one(self):
+        """Rotating a key invalidates the old one and accepts the new one."""
         old_key = self.api_key_from(self.invoke("register", "CNT-002", "CONTAINER_MONITOR"))
 
         result = self.invoke("rotate-key", "CNT-002")
@@ -58,6 +68,7 @@ class DevicesCliTestCase(unittest.TestCase):
         self.assertEqual(self.sign_in("CNT-002", new_key).status_code, 200)
 
     def test_revoked_device_cannot_sign_in_and_is_listed_as_revoked(self):
+        """A revoked device cannot sign in and appears as revoked in the list."""
         api_key = self.api_key_from(self.invoke("register", "CNT-003", "CONTAINER_MONITOR"))
 
         result = self.invoke("revoke", "CNT-003")
@@ -69,6 +80,7 @@ class DevicesCliTestCase(unittest.TestCase):
         self.assertIn(["ENV-001", "ENVIRONMENTAL_DEVICE", "active"], listed)
 
     def test_reports_unknown_device(self):
+        """Revoking or rotating an unknown device fails with exit code 1."""
         for command in ("revoke", "rotate-key"):
             with self.subTest(command=command):
                 result = self.invoke(command, "CNT-404")

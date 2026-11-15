@@ -5,6 +5,7 @@ import peewee
 from iam.domain.credentials import ApiCredential
 from iam.domain.entities import Device
 from iam.domain.enums import DeviceType
+from iam.domain.errors import DeviceAlreadyRegistered
 from iam.infrastructure.models import Device as DeviceModel
 
 
@@ -35,6 +36,21 @@ class DeviceRepository:
             row.created_at,
             row.revoked_at,
         )
+
+    def add(self, device: Device) -> Device:
+        """Insert a new aggregate; the primary key refuses a second one with the same identity."""
+        try:
+            with DeviceModel._meta.database.atomic():
+                DeviceModel.create(
+                    device_id=device.device_id,
+                    credential_verifier=device.credential.encode(),
+                    device_type=device.device_type.value,
+                    created_at=device.created_at,
+                    revoked_at=device.revoked_at,
+                )
+        except peewee.IntegrityError as error:
+            raise DeviceAlreadyRegistered from error
+        return device
 
     def save(self, device: Device) -> Device:
         """Insert or update the persisted aggregate state."""
