@@ -17,7 +17,7 @@ The QualiTrack nodes are:
 
 - **Implemented**
   - sign-in of the environmental device and the container monitor with their
-    `device_id` and `X-API-Key` at `POST /api/v1/auth/sign-in` (TS53, TS54)
+    `device_id` and `X-API-Key` (or `Authorization: Bearer`) at `POST /api/v1/auth/sign-in` (TS53, TS54)
   - `flask devices` commands to register the nodes with a random API key,
     rotate their key, revoke them and list them
   - API keys stored as SHA-256 verifiers; a key stored before with PBKDF2
@@ -424,7 +424,7 @@ active, and presents its matching API key (TS53, TS54).
 #### Required headers
 
 - `Content-Type: application/json`
-- `X-API-Key: <node api key>`
+- `X-API-Key: <node api key>`, or `Authorization: Bearer <node api key>` (ADR-0018)
 
 #### Request body
 
@@ -490,8 +490,9 @@ Header: `Content-Type: application/json`.
 
 The three endpoints below share these rules:
 
-- Headers: `Content-Type: application/json` and `X-API-Key: <node api key>`;
-  the body carries the `device_id` of the node.
+- Headers: `Content-Type: application/json` and `X-API-Key: <node api key>`
+  (or `Authorization: Bearer <node api key>`, ADR-0018); the body carries the
+  `device_id` of the node.
 - Times are ISO 8601 with an offset, supplied by the node and normalized to
   UTC. They cannot be more than 5 minutes in the future, as in the cloud.
 - `profile_version` (optional) is the version of the environmental profile the
@@ -594,7 +595,7 @@ The response is the stored action with its `id` and `sync_status`.
 
 `GET /api/v1/configurations/{deviceId}`
 
-Header: `X-API-Key: <node api key>`. The node reads its own configuration: the
+Header: `X-API-Key: <node api key>` (or `Authorization: Bearer <node api key>`). The node reads its own configuration: the
 profile of its environment for the environmental device, or its own profile
 for a container monitor, as the Edge last copied it from the cloud. The node
 applies the thresholds and rules and sends `profile_version` back with its
