@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
 ### Added
 
 - IAM (iam) and Tracking (tracking): the nodes may send their API key as `Authorization: Bearer <key>` when they do not send `X-API-Key`, so a node built on the Modest IoT Nano Framework reaches the Edge with its `HttpGatewayClient`. `X-API-Key` still works and wins when both arrive; another scheme or an empty token is a missing key (ADR-0018).
@@ -25,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - IAM (iam): two registrations of the same node at the same time, for example `flask devices register` and `POST /api/v1/devices/enroll`, no longer both answer "Registered" with only the last key working; the second one fails with "already registered".
 - Sync (sync): the profile read from the cloud is parsed once.
+- Settings: `CLOUD_API_URL` must be an http or https URL with a host and a valid port, and without a user, password, query or fragment; any other value stops the start with "CLOUD_API_URL must be a valid http or https URL" (#34).
 
 ### Removed
 
