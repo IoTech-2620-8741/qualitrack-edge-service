@@ -87,7 +87,9 @@ class LoadConfigTestCase(unittest.TestCase):
                 ValueError, "DEBUG must be set"
             ):
                 load_config(root)
+
     def test_rejects_cloud_urls_without_hostname_or_with_invalid_port(self):
+        """A cloud URL without a host, with an invalid port, credentials, a query or a fragment raises ValueError."""
         cloud_settings = {
             "CLOUD_SYNC_ENABLED": "true",
             "CLOUD_DEVICE_ID": "EDGE-001",
@@ -121,7 +123,6 @@ class LoadConfigTestCase(unittest.TestCase):
                     ValueError, "valid http or https URL"
                 ):
                     load_config(root)
-
 
     def test_rejects_debug_or_test_seeding_in_production(self):
         """Debug or test seeding in production raises ValueError."""
