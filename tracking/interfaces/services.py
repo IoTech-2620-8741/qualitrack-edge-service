@@ -7,7 +7,7 @@ services and maps the results back to JSON responses. This layer owns no
 domain logic.
 
 Each telemetry request carries the ``device_id`` of the node in the body and
-its API key in the ``X-API-Key`` header. Responses: ``201`` when something new is stored,
+its API key in the ``X-API-Key`` header or as an ``Authorization: Bearer`` token. Responses: ``201`` when something new is stored,
 ``200`` for an identical retry, ``400`` for invalid data, ``401`` for missing
 or rejected credentials, ``403`` when the node type does not send that
 telemetry, ``409`` when a retry changes a stored observation and ``415`` for a
@@ -31,6 +31,21 @@ from tracking.domain.enums import (
 from tracking.domain.errors import TelemetryConflict
 
 tracking_api = Blueprint("tracking_api", __name__)
+
+
+def _node_api_key() -> str | None:
+    """Return the API key of the node: the ``X-API-Key`` header, or else an ``Authorization: Bearer`` token.
+
+    Nodes built on the Modest IoT Nano Framework send the key with its ``HttpGatewayClient``, which can only
+    set the ``Authorization`` header. When both headers arrive, ``X-API-Key`` wins.
+    """
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        return api_key
+    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
 
 
 class _TelemetryRequest(BaseModel):
@@ -125,7 +140,7 @@ def _parse(request_model):
         parsed = request_model.model_validate(request_data)
     except ValidationError:
         return None, None, (jsonify({"error": "Invalid telemetry request"}), 400)
-    api_key = request.headers.get("X-API-Key")
+    api_key = _node_api_key()
     if not api_key:
         return None, None, (jsonify({"error": "Missing X-API-Key"}), 401)
     return parsed, api_key, None
@@ -231,12 +246,12 @@ def get_configuration(device_id: str):
     """Hand a node the profile it applies (TS58 for the environmental device, TS59 for a container monitor).
 
     The node identifies itself with its ``device_id`` in the path and its API
-    key in the ``X-API-Key`` header, so it can only read its own
-    configuration. Responses: ``200`` with the thresholds, the actuation rules
+    key in the ``X-API-Key`` header (or as an ``Authorization: Bearer`` token), so it can
+    only read its own configuration. Responses: ``200`` with the thresholds, the actuation rules
     and the profile version; ``401`` for missing or rejected credentials;
     ``404`` while the Edge has no profile of the cloud for the node.
     """
-    api_key = request.headers.get("X-API-Key")
+    api_key = _node_api_key()
     if not api_key:
         return jsonify({"error": "Missing X-API-Key"}), 401
     try:

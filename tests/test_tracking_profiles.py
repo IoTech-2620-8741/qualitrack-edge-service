@@ -143,6 +143,15 @@ class ConfigurationApiTestCase(unittest.TestCase):
             "synced_at": "2026-11-03T15:00:00Z",
         })
 
+
+    def test_hands_the_configuration_for_a_bearer_token(self):
+        """The node may send its key as ``Authorization: Bearer`` to read its configuration."""
+        response = self.client.get("/api/v1/configurations/CNT-CONF",
+                                   headers={"Authorization": f"Bearer {self.container_key}"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["profile_version"], 7)
+
     def test_rejects_other_credentials_and_reports_a_missing_profile(self):
         """Missing or wrong keys return 401; a node without profile returns 404."""
         self.assertEqual(self.get("CNT-CONF", None).status_code, 401)

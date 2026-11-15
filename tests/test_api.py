@@ -63,6 +63,32 @@ class IamApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json, {"error": "Missing X-API-Key"})
 
+
+    def test_signs_in_with_the_api_key_as_a_bearer_token(self):
+        """A node that sends its key as ``Authorization: Bearer`` (Modest IoT HttpGatewayClient) signs in."""
+
+        response = self.client.post(
+            "/api/v1/auth/sign-in",
+            json={"device_id": "ENV-001"},
+            headers={"Authorization": "Bearer test-only-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["device_id"], "ENV-001")
+
+    def test_rejects_other_authorization_schemes(self):
+        """Only a non-empty Bearer token counts as the API key; other schemes are a missing key."""
+
+        for authorization in ("Basic test-only-key", "Bearer ", "test-only-key"):
+            with self.subTest(authorization=authorization):
+                response = self.client.post(
+                    "/api/v1/auth/sign-in",
+                    json={"device_id": "ENV-001"},
+                    headers={"Authorization": authorization},
+                )
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(response.json, {"error": "Missing X-API-Key"})
+
     def test_rejects_malformed_or_extra_request_fields(self):
         """Invalid bodies or unexpected fields are rejected with 400."""
 

@@ -8,6 +8,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 iam_api = Blueprint("iam_api", __name__)
 
 
+def _node_api_key() -> str | None:
+    """Return the API key of the node: the ``X-API-Key`` header, or else an ``Authorization: Bearer`` token.
+
+    Nodes built on the Modest IoT Nano Framework send the key with its ``HttpGatewayClient``, which can only
+    set the ``Authorization`` header. When both headers arrive, ``X-API-Key`` wins.
+    """
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        return api_key
+    scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
+
+
 class SignInRequest(BaseModel):
     """Request contract for the sign-in of one registered device."""
 
@@ -21,7 +36,7 @@ def sign_in_device():
     """Sign in an environmental device or a container monitor (TS53, TS54).
 
     The device identity is supplied in the JSON body and its API key in the
-    ``X-API-Key`` header. This endpoint reports the authentication outcome and
+    ``X-API-Key`` header or as an ``Authorization: Bearer`` token. This endpoint reports the authentication outcome and
     the type of the device; device registration, credential rotation and
     revocation are not exposed over HTTP.
 
@@ -42,7 +57,7 @@ def sign_in_device():
     except ValidationError:
         return jsonify({"error": "Invalid sign-in request"}), 400
 
-    api_key = request.headers.get("X-API-Key")
+    api_key = _node_api_key()
     if not api_key:
         return jsonify({"error": "Missing X-API-Key"}), 401
 
