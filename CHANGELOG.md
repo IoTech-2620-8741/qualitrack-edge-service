@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-15
+
+First stable version of the Edge Application of QualiTrack. From this version the public API — the HTTP routes under `/api/v1`, the `flask devices` and `flask cloud` commands, the settings and the SQLite database — follows Semantic Versioning: a change that breaks it raises the major version. `POST /api/v1/devices/enroll` stays development only and out of that contract.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added
@@ -120,3 +124,11 @@ First version of the Edge Application of QualiTrack: the Edge stories of the Qua
 - The empty Compliance & Alerting (ca) scaffold: the alerts are evaluated in the cloud (#1).
 
 - IAM (iam): `POST /api/v1/iam/authentications`, replaced by `POST /api/v1/auth/sign-in` (#2).
+
+[Unreleased]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.4.0...v1.0.0
+[0.4.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/releases/tag/v0.1.0
