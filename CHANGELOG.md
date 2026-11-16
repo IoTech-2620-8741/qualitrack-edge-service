@@ -124,3 +124,11 @@ First version of the Edge Application of QualiTrack: the Edge stories of the Qua
 - The empty Compliance & Alerting (ca) scaffold: the alerts are evaluated in the cloud (#1).
 
 - IAM (iam): `POST /api/v1/iam/authentications`, replaced by `POST /api/v1/auth/sign-in` (#2).
+
+[Unreleased]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.4.0...v1.0.0
+[0.4.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/releases/tag/v0.1.0
