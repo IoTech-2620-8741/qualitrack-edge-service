@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-15
+
+First stable version of the Edge Application of QualiTrack. From this version the public API — the HTTP routes under `/api/v1`, the `flask devices` and `flask cloud` commands, the settings and the SQLite database — follows Semantic Versioning: a change that breaks it raises the major version. `POST /api/v1/devices/enroll` stays development only and out of that contract.
+
 ## [0.4.0] - 2026-11-15
 
 ### Added
