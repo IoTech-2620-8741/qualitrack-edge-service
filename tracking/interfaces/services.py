@@ -60,12 +60,15 @@ class EnvironmentReadingRequest(_TelemetryRequest):
 
     measured_at: AwareDatetime = Field(..., description="ISO 8601 measurement time with offset.")
     air_quality: float | None = Field(None, description="Air quality in ppm.")
+    luminosity: float | None = Field(None, description="Luminosity of the room in lux.")
     motion: bool | None = Field(None, description="Whether motion was detected.")
 
     def values(self) -> dict[Metric, float]:
         values = {}
         if self.air_quality is not None:
             values[Metric.AIR_QUALITY] = self.air_quality
+        if self.luminosity is not None:
+            values[Metric.LUMINOSITY] = self.luminosity
         if self.motion is not None:
             values[Metric.MOTION] = 1.0 if self.motion else 0.0
         return values
