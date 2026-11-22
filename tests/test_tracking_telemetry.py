@@ -157,6 +157,22 @@ class TelemetryApiTestCase(unittest.TestCase):
             stored = TelemetryReadingModel.select().where(TelemetryReadingModel.device_id == "ENV-001").count()
         self.assertGreaterEqual(stored, 2)
 
+    def test_environment_readings_carry_the_luminosity_of_the_room(self):
+        """An environmental device may send the luminosity alone or with the air quality."""
+        with_air = self.post("/api/v1/monitoring/environment-readings",
+                             {"device_id": "ENV-001", "measured_at": self.at(31), "air_quality": 412.5,
+                              "luminosity": 300.0},
+                             "test-only-key")
+        alone = self.post("/api/v1/monitoring/environment-readings",
+                          {"device_id": "ENV-001", "measured_at": self.at(32), "luminosity": 0},
+                          "test-only-key")
+
+        self.assertEqual(with_air.status_code, 201)
+        self.assertEqual([(r["metric"], r["value"]) for r in with_air.json["readings"]],
+                         [("AIR_QUALITY", 412.5), ("LUMINOSITY", 300.0)])
+        self.assertEqual(alone.status_code, 201)
+        self.assertEqual([(r["metric"], r["value"]) for r in alone.json["readings"]], [("LUMINOSITY", 0.0)])
+
     def test_container_readings_with_a_changed_value_conflict_and_store_nothing(self):
         """A retry with different data returns 409 and stores nothing of the request."""
         measured_at = self.at(40)
@@ -218,6 +234,7 @@ class TelemetryApiTestCase(unittest.TestCase):
             {"device_id": "ENV-001", "air_quality": 400},
             {"device_id": "ENV-001", "measured_at": self.at(-10), "air_quality": 400},
             {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": "high"},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": "bright"},
             {"device_id": "ENV-001", "measured_at": self.at(70), "temperature": 21.5},
             {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": 400, "profile_version": -1},
         ):
