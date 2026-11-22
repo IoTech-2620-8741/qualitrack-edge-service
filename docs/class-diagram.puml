@@ -172,8 +172,9 @@ package "Tracking Bounded Context" #DEEAFF {
       HUMIDITY
       LUMINOSITY
       RFID_TAG
-      +device_type: DeviceType
+      +device_types: frozenset[DeviceType]
       +has_thresholds: bool
+      +is_reported_by(device_type): bool
     }
 
     enum SyncStatus {
@@ -247,6 +248,7 @@ package "Tracking Bounded Context" #DEEAFF {
       +measured_at: AwareDatetime
       +profile_version: int | None
       +air_quality: float | None
+      +luminosity: float | None
       +motion: bool | None
     }
 

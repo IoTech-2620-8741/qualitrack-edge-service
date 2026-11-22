@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tracking (tracking): `POST /api/v1/monitoring/environment-readings` accepts `luminosity` (lux), the light of the room that the Environment Monitor measures with its BH1750, alone or with `air_quality` and `motion`. It is stored as a `LUMINOSITY` reading like the one of the container monitor. A node that does not send it works as before.
+
+### Changed
+
+- Tracking (tracking): `Metric.device_type` is replaced by `Metric.device_types` and `Metric.is_reported_by()`, because `LUMINOSITY` is reported by both node types. Only a container monitor still sends temperature, humidity, RFID tags and actions, and only the environmental device sends air quality and motion.
+
 ## [1.0.0] - 2026-11-15
 
 First stable version of the Edge Application of QualiTrack. From this version the public API — the HTTP routes under `/api/v1`, the `flask devices` and `flask cloud` commands, the settings and the SQLite database — follows Semantic Versioning: a change that breaks it raises the major version. `POST /api/v1/devices/enroll` stays development only and out of that contract.

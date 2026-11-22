@@ -81,15 +81,15 @@ Acceptance criteria:
 ---
 
 ### TS55 — Receive the telemetry of the environmental device in the Edge
-As a Developer, I want to receive the air quality and the motion events from the environmental device through the Edge API, so that they are stored locally.
+As a Developer, I want to receive the air quality, the luminosity and the motion events from the environmental device through the Edge API, so that they are stored locally.
 
 Acceptance criteria:
 - Scenario: Valid reading
   - Given the environmental device sends `POST /api/v1/monitoring/environment-readings` with its `device_id` and `X-API-Key`
-  - And the body has a `measured_at` with offset and at least one of `air_quality` (ppm) and `motion` (`true` or `false`)
+  - And the body has a `measured_at` with offset and at least one of `air_quality` (ppm), `luminosity` (lux) and `motion` (`true` or `false`)
   - When the Edge validates and stores the reading
   - Then the Edge returns `201 Created`
-  - And the response lists one stored reading per metric (`AIR_QUALITY`, `MOTION` as 1 or 0) with `"sync_status": "PENDING"`
+  - And the response lists one stored reading per metric (`AIR_QUALITY`, `LUMINOSITY`, `MOTION` as 1 or 0) with `"sync_status": "PENDING"`
   - And `measured_at` is returned in UTC
 
 - Scenario: Retry of the same reading
