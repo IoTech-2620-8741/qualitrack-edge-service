@@ -3,14 +3,13 @@
 Exposes a Flask Blueprint (``sync_api``) with the enrollment of the nodes the
 cached cloud registry assigns to this Edge. This layer owns no domain logic.
 """
-from flask import Blueprint, current_app, jsonify, request
+from flask import current_app, jsonify, request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
+from flask_openapi import Tag
 from sync.application.errors import DeviceAlreadyEnrolled, DeviceEnrollmentNotAllowed
 from tracking.domain.enums import DeviceType
 
-sync_api = Blueprint("sync_api", __name__)
-
+SYNC_TAG = Tag(name="Sync", description="Cloud synchronization")
 
 class EnrollDeviceRequest(BaseModel):
     """Initial enrollment request submitted by an ESP32."""
@@ -32,8 +31,6 @@ class EnrollDeviceRequest(BaseModel):
         description="IoT device type registered in the cloud.",
     )
 
-
-@sync_api.route("/api/v1/devices/enroll", methods=["POST"])
 def enroll_device():
     """Enroll an IoT device using the cached cloud registry.
 
@@ -103,3 +100,8 @@ def enroll_device():
     response.headers["Cache-Control"] = "no-store"
 
     return response, 201
+
+def init_routes(app):
+    @app.post("/api/v1/devices/enroll", summary="Enroll a device from the cached cloud registry", tags=[Tag(name="Sync")])
+    def api_enroll_device():
+        return enroll_device()
