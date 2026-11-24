@@ -13,9 +13,9 @@ or rejected credentials, ``403`` when the node type does not send that
 telemetry, ``409`` when a retry changes a stored observation and ``415`` for a
 non-JSON request.
 """
-from flask import Blueprint, current_app, jsonify, request
+from flask import current_app, jsonify, request
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
-
+from flask_openapi import Tag
 from tracking.application.errors import (
     ConfigurationNotAvailable,
     DeviceAuthenticationFailed,
@@ -30,7 +30,7 @@ from tracking.domain.enums import (
 )
 from tracking.domain.errors import TelemetryConflict
 
-tracking_api = Blueprint("tracking_api", __name__)
+TRACKING_TAG = Tag(name="Tracking", description="Telemetry and configurations")
 
 
 def _node_api_key() -> str | None:
@@ -175,19 +175,15 @@ def _record_readings(request_model, device_type: DeviceType):
     }), 201 if result.created else 200
 
 
-@tracking_api.route("/api/v1/monitoring/environment-readings", methods=["POST"])
 def create_environment_readings():
     """Receive the air quality and motion the environmental device measured (TS55)."""
     return _record_readings(EnvironmentReadingRequest, DeviceType.ENVIRONMENTAL_DEVICE)
 
 
-@tracking_api.route("/api/v1/monitoring/container-readings", methods=["POST"])
 def create_container_readings():
     """Receive the temperature, humidity, luminosity and RFID tag of a container monitor (TS56)."""
     return _record_readings(ContainerReadingRequest, DeviceType.CONTAINER_MONITOR)
 
-
-@tracking_api.route("/api/v1/control/actuation-events", methods=["POST"])
 def create_actuation_event():
     """Receive an action a container monitor executed (TS57)."""
     parsed, api_key, error = _parse(ActuationEventRequest)
@@ -240,8 +236,6 @@ def _configuration_resource(configuration) -> dict:
         "synced_at": _iso(profile.synced_at),
     }
 
-
-@tracking_api.route("/api/v1/configurations/<device_id>", methods=["GET"])
 def get_configuration(device_id: str):
     """Hand a node the profile it applies (TS58 for the environmental device, TS59 for a container monitor).
 
@@ -261,3 +255,20 @@ def get_configuration(device_id: str):
     except ConfigurationNotAvailable:
         return jsonify({"error": "The Edge has no profile of the cloud for this device yet"}), 404
     return jsonify(_configuration_resource(configuration)), 200
+
+def init_routes(app):
+    @app.post("/api/v1/monitoring/environment-readings", summary="Submit environmental readings", tags=[Tag(name="Tracking")])
+    def api_create_environment_readings():
+        return create_environment_readings()
+
+    @app.post("/api/v1/monitoring/container-readings", summary="Submit container-monitor readings", tags=[Tag(name="Tracking")])
+    def api_create_container_readings():
+        return create_container_readings()
+
+    @app.post("/api/v1/control/actuation-events", summary="Submit an actuation event", tags=[Tag(name="Tracking")])
+    def api_create_actuation_event():
+        return create_actuation_event()
+
+    @app.get("/api/v1/configurations/<device_id>", summary="Read the configuration for a device", tags=[Tag(name="Tracking")])
+    def api_get_configuration(device_id: str):
+        return get_configuration(device_id)
