@@ -6,12 +6,11 @@ from the local network. It needs no API key and reveals no identifiers, keys
 or error messages. This layer owns no logic: it maps the report of
 :class:`~shared.infrastructure.health.EdgeHealthCheck` to JSON.
 """
-from flask import Blueprint, current_app, jsonify
-
+from flask import current_app, jsonify
+from flask_openapi import Tag
 from shared.infrastructure.health import CloudSyncHealth, HealthStatus
 
-health_api = Blueprint("health_api", __name__)
-
+SHARED_TAG = Tag(name="Shared", description="Shared infrastructure")
 
 def _iso(value) -> str | None:
     return None if value is None else value.isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -28,8 +27,6 @@ def _cloud_sync_resource(cloud_sync: CloudSyncHealth) -> dict:
         "behind": cloud_sync.behind,
     }
 
-
-@health_api.route("/api/v1/health", methods=["GET"])
 def check_health():
     """Report whether the Edge can serve the nodes and how the synchronization goes.
 
@@ -47,3 +44,8 @@ def check_health():
     })
     response.headers["Cache-Control"] = "no-store"
     return response, 503 if report.status is HealthStatus.UNAVAILABLE else 200
+
+def init_routes(app):
+    @app.get("/api/v1/health", summary="Check Edge health", tags=[Tag(name="Shared")])
+    def api_check_health():
+        return check_health()
