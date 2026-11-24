@@ -18,18 +18,14 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
-
-from flask import Flask
-
+from flask_openapi import OpenAPI, Info, Tag
 from config import load_config
 from iam.application.services import AuthApplicationService
 from iam.interfaces.cli import devices_cli
-from iam.interfaces.services import iam_api
 from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, database_available, db, init_db
 from shared.infrastructure.health import EdgeHealthCheck
-from shared.interfaces.services import health_api
 from sync.application.services import (
     DeviceRegistryApplicationService,
     ProfileSynchronizationApplicationService,
@@ -41,30 +37,28 @@ from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from sync.infrastructure.repositories import MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl
 from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer as SyncIamAntiCorruptionLayer
 from sync.interfaces.cli import cloud_cli
-from sync.interfaces.services import sync_api
-from tracking.application.services import (
-    EnvironmentalProfileApplicationService,
-    TelemetryApplicationService,
-)
-from tracking.infrastructure.repositories import (
-    ActuationEventRepository as ActuationEventRepositoryImpl,
-    EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
-    TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
-)
+from tracking.application.services import (EnvironmentalProfileApplicationService, TelemetryApplicationService,)
+from tracking.infrastructure.repositories import ( ActuationEventRepository as ActuationEventRepositoryImpl, EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl, TelemetryReadingRepository as TelemetryReadingRepositoryImpl,)
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
-from tracking.interfaces.services import tracking_api
+from tracking.interfaces.services import init_routes as init_tracking_routes
+from sync.interfaces.services import init_routes as init_sync_routes
+from shared.interfaces.services import init_routes as init_health_routes
+from iam.interfaces.services import init_routes as init_iam_routes
 
-def create_app() -> Flask:
+def create_app() -> OpenAPI:
     """Create and initialize the Flask application."""
-    app = Flask(__name__)
+    info = Info(title="QualiTrack Edge Service API", version="1.0.0")
+
+    app = OpenAPI(__name__, info=info)
     app.config.from_mapping(load_config(Path(__file__).resolve().parent))
     configure_database(app.config["DATABASE_PATH"])
     init_db()
 
-    app.register_blueprint(iam_api)
-    app.register_blueprint(tracking_api)
-    app.register_blueprint(sync_api)
-    app.register_blueprint(health_api)
+    init_iam_routes(app)
+    init_health_routes(app)
+    init_sync_routes(app)
+    init_tracking_routes(app)
+
     app.cli.add_command(devices_cli)
     app.cli.add_command(cloud_cli)
     iam_authentication_service = AuthApplicationService()
@@ -135,12 +129,7 @@ def create_app() -> Flask:
     return app
 
 
-def start_cloud_sync(app: Flask) -> None:
-    """Start the background cloud synchronization when it is enabled.
-
-    It runs only in the process that serves requests, never in ``flask``
-    commands, and only once under the development reloader.
-    """
+def start_cloud_sync(app: OpenAPI) -> None:
     scheduler = app.extensions.get("cloud_sync_scheduler")
     if scheduler is None:
         return
