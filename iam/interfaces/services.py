@@ -2,10 +2,11 @@
 
 Exposes IAM HTTP routes and adapts request data for IAM application use cases.
 """
-from flask import Blueprint, current_app, jsonify, request
+from flask import current_app, jsonify, request
+from flask_openapi import Tag
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-iam_api = Blueprint("iam_api", __name__)
+IAM_TAG = Tag(name="IAM", description="Identity and Access Management")
 
 
 def _node_api_key() -> str | None:
@@ -30,8 +31,6 @@ class SignInRequest(BaseModel):
 
     device_id: str = Field(..., min_length=1, description="Identifier of the device.")
 
-
-@iam_api.route("/api/v1/auth/sign-in", methods=["POST"])
 def sign_in_device():
     """Sign in an environmental device or a container monitor (TS53, TS54).
 
@@ -72,3 +71,8 @@ def sign_in_device():
         "device_type": device.device_type.value,
         "authenticated": True,
     }), 200
+
+def init_routes(app):
+    @app.post("/api/v1/auth/sign-in", summary="Authenticate a registered device", tags=[Tag(name="IAM")])
+    def api_sign_in():
+        return sign_in_device()
