@@ -154,7 +154,7 @@ class CloudOverHttpTestCase(unittest.TestCase):
     def test_the_sync_command_sends_what_the_nodes_sent_to_the_edge(self):
         client = self.app.test_client()
         measured_at = (datetime.now(UTC) - timedelta(minutes=10)).replace(microsecond=0)
-        for minutes, metrics in ((0, {"air_quality": 412.5, "luminosity": 0}), (1, {"air_quality": -3.0})):
+        for minutes, metrics in ((0, {"air_quality": 412.5, "luminosity": 0, "motion": True}), (1, {"air_quality": -3.0})):
             sent = client.post("/api/v1/monitoring/environment-readings", headers={"X-API-Key": "test-only-key"},
                                json={"device_id": "ENV-001", **metrics, "profile_version": 2,
                                      "measured_at": (measured_at + timedelta(minutes=minutes)).isoformat()})
@@ -187,20 +187,20 @@ class CloudOverHttpTestCase(unittest.TestCase):
         profile_requests = [path for method, path, _, _ in FakeCloudHandler.received
                             if path.endswith("/environmental-profile")]
         self.assertEqual(set(profile_requests),{_PROFILE})
-        self.assertIn("Readings: 2 synced, 1 rejected, 0 waiting", first.output)
+        self.assertIn("Readings: 3 synced, 1 rejected, 0 waiting", first.output)
         self.assertIn("Readings: 0 synced, 0 rejected, 0 waiting", second.output)
         telemetry = [(body, authorization) for method, path, body, authorization in FakeCloudHandler.received
                      if path == _ENVIRONMENT_TELEMETRY]
-        self.assertEqual(len(telemetry), 3)
+        self.assertEqual(len(telemetry), 4)
         # The readings are sent in parallel, so they may arrive in either order.
-        for metric, value in (("AIR_QUALITY", 412.5), ("LUMINOSITY", 0.0)):
+        for metric, value in (("AIR_QUALITY", 412.5), ("LUMINOSITY", 0.0), ("MOTION", 1.0)):
             self.assertIn(({
                 "metric": metric, "value": value, "textValue": None,
                 "measuredAt": measured_at.isoformat().replace("+00:00", "Z"), "profileVersion": 2,
             }, "gateway-secret"), telemetry)
         with self.app.app_context():
             statuses = [row.sync_status for row in TelemetryReadingModel.select().order_by(TelemetryReadingModel.id)]
-        self.assertEqual(statuses, ["SYNCED", "SYNCED", "REJECTED"])
+        self.assertEqual(statuses, ["SYNCED", "SYNCED", "SYNCED", "REJECTED"])
 
         configuration = client.get("/api/v1/configurations/ENV-001", headers={"X-API-Key": "test-only-key"})
         self.assertEqual(configuration.status_code, 200)
