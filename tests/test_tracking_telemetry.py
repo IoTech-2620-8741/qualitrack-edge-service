@@ -235,7 +235,9 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
 
     def test_rejects_invalid_readings(self):
-        """Invalid readings return 400; a non-JSON request returns 415."""
+        """Invalid readings return 400 and store nothing; a non-JSON request returns 415."""
+        with self.app.app_context():
+            stored = TelemetryReadingModel.select().count()
         for body in (
             {"device_id": "ENV-001", "measured_at": self.at(70)},
             {"device_id": "ENV-001", "measured_at": "2026-11-03T10:00:00", "air_quality": 400},
@@ -245,6 +247,8 @@ class TelemetryApiTestCase(unittest.TestCase):
             {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": "bright"},
             {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": "300"},
             {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": True},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": -0.1},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": 400, "luminosity": float("inf")},
             {"device_id": "ENV-001", "measured_at": self.at(70), "temperature": 21.5},
             {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": 400, "profile_version": -1},
         ):
@@ -254,6 +258,8 @@ class TelemetryApiTestCase(unittest.TestCase):
         non_json = self.client.post("/api/v1/monitoring/environment-readings", data="{}",
                                     content_type="text/plain", headers={"X-API-Key": "test-only-key"})
         self.assertEqual(non_json.status_code, 415)
+        with self.app.app_context():
+            self.assertEqual(TelemetryReadingModel.select().count(), stored)
 
     def test_actuation_events_are_stored_once(self):
         """A valid action is stored once; a retry returns it; different data conflicts."""

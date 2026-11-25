@@ -15,6 +15,7 @@ from sync.infrastructure.cloud_profile_gateway import CloudProfileGateway
 from sync.infrastructure.cloud_registry_gateway import CloudDeviceRegistryGateway
 from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from sync.infrastructure.repositories import MonitoredDeviceRepository
+from tracking.domain.enums import DeviceType, Metric
 from tracking.infrastructure.models import ActuationEvent as ActuationEventModel
 from tracking.infrastructure.models import TelemetryReading as TelemetryReadingModel
 from tracking.infrastructure.repositories import (
@@ -27,7 +28,8 @@ _GATEWAY = "/api/v1/edge-gateways/EDGE-001"
 _REGISTRY = f"{_GATEWAY}/iot-devices"
 _PROFILE = f"{_REGISTRY}/15/environmental-profile"
 _ENVIRONMENT_TELEMETRY = f"{_REGISTRY}/15/telemetry-measurements"
-# The metrics the cloud accepts from an environmental device (MonitoredMetric of qualitrack-platform 2.1.0).
+# The metrics the cloud accepts from an environmental device, copied by hand from MonitoredMetric of
+# qualitrack-platform 2.1.0: update it when the cloud changes its rule (ADR-0009).
 _ENVIRONMENT_METRICS = ("AIR_QUALITY", "LUMINOSITY", "MOTION")
 
 
@@ -214,6 +216,12 @@ class CloudOverHttpTestCase(unittest.TestCase):
             "critical_min": None, "critical_max": 1000.0,
         }])
         self.assertEqual(configuration.json["updated_at"], "2026-11-03T14:00:00Z")
+
+    def test_the_environmental_device_reports_what_the_cloud_accepts(self):
+        """A metric the cloud does not accept would be stored by the Edge and rejected for good."""
+        reported = {metric.value for metric in Metric if DeviceType.ENVIRONMENTAL_DEVICE in metric.device_types}
+
+        self.assertEqual(reported, set(_ENVIRONMENT_METRICS))
 
     def test_reads_the_registry_over_http_with_the_gateway_api_key(self):
         with self.app.app_context():

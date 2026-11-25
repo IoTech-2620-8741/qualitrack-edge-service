@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Tracking (tracking): `POST /api/v1/monitoring/environment-readings` accepts `luminosity` (lux, a JSON number), the light of the room that the Environment Monitor measures with its BH1750, alone or with `air_quality` and `motion`. It is stored as a `LUMINOSITY` reading like the one of the container monitor. A node that does not send it works as before. The cloud accepts it from qualitrack-platform 2.1.0; an older one rejects it for good.
+- Tracking (tracking): `POST /api/v1/monitoring/environment-readings` accepts `luminosity` (lux, a JSON number of 0 or more), the light of the room that the Environment Monitor measures with its BH1750, alone or with `air_quality` and `motion`. It is stored as a `LUMINOSITY` reading like the one of the container monitor. A node that does not send it works as before. The cloud accepts it from qualitrack-platform 2.1.0; an older one rejects it for good. Update the Edge before the firmware that sends it: 1.0.0 answers `400` to the whole request.
 
 ### Changed
 
