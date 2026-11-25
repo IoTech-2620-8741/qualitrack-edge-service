@@ -157,6 +157,30 @@ class TelemetryApiTestCase(unittest.TestCase):
             stored = TelemetryReadingModel.select().where(TelemetryReadingModel.device_id == "ENV-001").count()
         self.assertGreaterEqual(stored, 2)
 
+    def test_environment_readings_carry_the_luminosity_of_the_room(self):
+        """An environmental device may send the luminosity alone or with the air quality.
+
+        A container monitor may report its own luminosity at the same moment.
+        """
+        measured_at = self.at(32)
+        with_air = self.post("/api/v1/monitoring/environment-readings",
+                             {"device_id": "ENV-001", "measured_at": self.at(31), "air_quality": 412.5,
+                              "luminosity": 300.0},
+                             "test-only-key")
+        alone = self.post("/api/v1/monitoring/environment-readings",
+                          {"device_id": "ENV-001", "measured_at": measured_at, "luminosity": 0},
+                          "test-only-key")
+        container = self.post("/api/v1/monitoring/container-readings",
+                              {"device_id": "CNT-API", "measured_at": measured_at, "luminosity": 120},
+                              self.container_key)
+
+        self.assertEqual(with_air.status_code, 201)
+        self.assertEqual([(r["metric"], r["value"]) for r in with_air.json["readings"]],
+                         [("AIR_QUALITY", 412.5), ("LUMINOSITY", 300.0)])
+        self.assertEqual(alone.status_code, 201)
+        self.assertEqual([(r["metric"], r["value"]) for r in alone.json["readings"]], [("LUMINOSITY", 0.0)])
+        self.assertEqual(container.status_code, 201)
+
     def test_container_readings_with_a_changed_value_conflict_and_store_nothing(self):
         """A retry with different data returns 409 and stores nothing of the request."""
         measured_at = self.at(40)
@@ -211,13 +235,20 @@ class TelemetryApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 201)
 
     def test_rejects_invalid_readings(self):
-        """Invalid readings return 400; a non-JSON request returns 415."""
+        """Invalid readings return 400 and store nothing; a non-JSON request returns 415."""
+        with self.app.app_context():
+            stored = TelemetryReadingModel.select().count()
         for body in (
             {"device_id": "ENV-001", "measured_at": self.at(70)},
             {"device_id": "ENV-001", "measured_at": "2026-11-03T10:00:00", "air_quality": 400},
             {"device_id": "ENV-001", "air_quality": 400},
             {"device_id": "ENV-001", "measured_at": self.at(-10), "air_quality": 400},
             {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": "high"},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": "bright"},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": "300"},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": True},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": -0.1},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": 400, "luminosity": float("inf")},
             {"device_id": "ENV-001", "measured_at": self.at(70), "temperature": 21.5},
             {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": 400, "profile_version": -1},
         ):
@@ -227,6 +258,8 @@ class TelemetryApiTestCase(unittest.TestCase):
         non_json = self.client.post("/api/v1/monitoring/environment-readings", data="{}",
                                     content_type="text/plain", headers={"X-API-Key": "test-only-key"})
         self.assertEqual(non_json.status_code, 415)
+        with self.app.app_context():
+            self.assertEqual(TelemetryReadingModel.select().count(), stored)
 
     def test_actuation_events_are_stored_once(self):
         """A valid action is stored once; a retry returns it; different data conflicts."""

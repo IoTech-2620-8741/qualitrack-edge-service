@@ -80,7 +80,7 @@ package "IAM Bounded Context" #FFEBDE {
       +device_id: str
     }
 
-    class iam_api <<Flask Blueprint>> {
+    class iam_api <<APIBlueprint>> {
       +POST /api/v1/auth/sign-in
     }
 
@@ -172,7 +172,7 @@ package "Tracking Bounded Context" #DEEAFF {
       HUMIDITY
       LUMINOSITY
       RFID_TAG
-      +device_type: DeviceType
+      +device_types: frozenset[DeviceType]
       +has_thresholds: bool
     }
 
@@ -247,6 +247,7 @@ package "Tracking Bounded Context" #DEEAFF {
       +measured_at: AwareDatetime
       +profile_version: int | None
       +air_quality: float | None
+      +luminosity: float | None
       +motion: bool | None
     }
 
@@ -270,7 +271,7 @@ package "Tracking Bounded Context" #DEEAFF {
       +profile_version: int | None
     }
 
-    class tracking_api <<Flask Blueprint>> {
+    class tracking_api <<APIBlueprint>> {
       +POST /api/v1/monitoring/environment-readings
       +POST /api/v1/monitoring/container-readings
       +POST /api/v1/control/actuation-events
@@ -364,7 +365,7 @@ package "Sync Bounded Context" #F0E6FF {
   }
 
   package "interfaces" as sync_interfaces #CEBCFF {
-    class sync_api <<Flask Blueprint>> {
+    class sync_api <<APIBlueprint>> {
       +POST /api/v1/devices/enroll
     }
 
@@ -435,14 +436,14 @@ package "Shared" #E8FFE8 {
   }
 
   package "interfaces" as shared_interfaces #D0EED0 {
-    class health_api <<Flask Blueprint>> {
+    class health_api <<APIBlueprint>> {
       +GET /api/v1/health
     }
   }
 }
 
 class create_app {
-  +create_app(): Flask
+  +create_app(): OpenAPI
   +start_cloud_sync(app)
 }
 

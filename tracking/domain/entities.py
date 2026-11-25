@@ -126,7 +126,7 @@ class TelemetryReading:
             raise TypeError("Telemetry reading requires a ReportingDevice")
         if not isinstance(metric, Metric):
             raise TypeError("Telemetry reading requires a valid metric")
-        if metric.device_type is not reporting_device.device_type:
+        if reporting_device.device_type not in metric.device_types:
             raise ValueError(f"{metric.value} is not measured by {reporting_device.device_type.value} nodes")
         return cls(
             reporting_device.device_id,
@@ -203,7 +203,7 @@ class ActuationEvent:
                 raise TypeError("The cause of an action needs a valid metric and state")
             if (
                 not self.trigger_metric.has_thresholds
-                or self.trigger_metric.device_type is not DeviceType.CONTAINER_MONITOR
+                or DeviceType.CONTAINER_MONITOR not in self.trigger_metric.device_types
             ):
                 raise ValueError(f"Actions cannot be caused by {self.trigger_metric.value}")
 

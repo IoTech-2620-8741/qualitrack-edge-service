@@ -441,7 +441,66 @@ class CloudCliTestCase(unittest.TestCase):
 
         self.assertEqual(enrolled.status_code, 201, enrolled.json)
         self.assertTrue(enrolled.json["api_key"])
+        self.assertEqual(enrolled.headers["Cache-Control"], "no-store")
         self.assertEqual((again.status_code, unknown.status_code), (409, 403))
+        self.assertEqual(again.json, {"error": "Device is already registered"})
+        self.assertEqual(unknown.json, {"error": "Device is not authorized for enrollment"})
+
+    def test_rejects_the_enrollment_of_cached_nodes_the_registry_does_not_authorize(self):
+        """A cached node of another type, without environment or not operational gets 403, not 409."""
+        client = self.app.test_client()
+        not_operational = MonitoredDevice(
+            "ENV-OFF", DeviceType.ENVIRONMENTAL_DEVICE, 7, 2, 15, DeviceStatus.INACTIVE, NOW
+        )
+        with self.app.app_context():
+            MonitoredDeviceRepository().replace_all(
+                [monitored("ENV-TYPE"), monitored("ENV-NOENV", environment_id=None), not_operational]
+            )
+        try:
+            responses = [
+                client.post("/api/v1/devices/enroll", json={"device_id": device_id, "device_type": device_type})
+                for device_id, device_type in (
+                    ("ENV-TYPE", "CONTAINER_MONITOR"),
+                    ("ENV-NOENV", "ENVIRONMENTAL_DEVICE"),
+                    ("ENV-OFF", "ENVIRONMENTAL_DEVICE"),
+                )
+            ]
+        finally:
+            with self.app.app_context():
+                MonitoredDeviceRepository().replace_all([])
+
+        for response in responses:
+            self.assertEqual(response.status_code, 403, response.json)
+            self.assertEqual(response.json, {"error": "Device is not authorized for enrollment"})
+
+    def test_rejects_an_invalid_enrollment_request(self):
+        """An unknown device type, a missing field or a non-JSON body is rejected before enrolling."""
+        client = self.app.test_client()
+
+        unknown_type = client.post("/api/v1/devices/enroll", json={"device_id": "ENV-1", "device_type": "TOASTER"})
+        missing_type = client.post("/api/v1/devices/enroll", json={"device_id": "ENV-1"})
+        not_json = client.post("/api/v1/devices/enroll", data="ENV-1", content_type="text/plain")
+
+        self.assertEqual((unknown_type.status_code, missing_type.status_code), (400, 400))
+        self.assertEqual(unknown_type.json, {"error": "Invalid device enrollment request"})
+        self.assertEqual(not_json.status_code, 415)
+
+    def test_enrollment_is_disabled_outside_development(self):
+        """Outside development the route answers 403 whatever the body."""
+        client = self.app.test_client()
+        self.app.config["APP_ENV"] = "production"
+        try:
+            valid = client.post(
+                "/api/v1/devices/enroll", json={"device_id": "ENV-1", "device_type": "ENVIRONMENTAL_DEVICE"}
+            )
+            invalid = client.post("/api/v1/devices/enroll", json={"unexpected": True})
+            not_json = client.post("/api/v1/devices/enroll", data="ENV-1", content_type="text/plain")
+        finally:
+            self.app.config["APP_ENV"] = "development"
+
+        for response in (valid, invalid, not_json):
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json, {"error": "Unverified device enrollment is disabled"})
 
 
 if __name__ == "__main__":
