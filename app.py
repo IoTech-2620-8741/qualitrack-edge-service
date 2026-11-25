@@ -18,6 +18,7 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
+from flask import jsonify, request
 from flask_openapi3 import OpenAPI, Info
 from config import load_config
 from iam.application.services import AuthApplicationService
@@ -46,6 +47,57 @@ from sync.interfaces.services import init_routes as init_sync_routes
 from shared.interfaces.services import init_routes as init_health_routes
 
 
+def _json_error(message: str, status: int):
+    """Build a JSON error response with the given status code.
+
+    The status is set on the response itself because ``flask_openapi3`` passes
+    the callback result to ``abort``, which does not accept a ``(body, status)``
+    tuple.
+
+    Args:
+        message: Text to return in the ``error`` field.
+        status: HTTP status code of the response.
+
+    Returns:
+        A JSON ``Response`` with the status already applied.
+    """
+    response = jsonify({"error": message})
+    response.status_code = status
+    return response
+
+
+def _validation_error_callback(_error):
+    """Translate a request validation failure into the project's error format.
+
+    ``flask_openapi3`` answers validation errors with 422 by default. This
+    callback keeps the contract of each bounded context instead: telemetry
+    routes answer 401 when ``device_id`` is missing and 400 otherwise, device
+    enrollment answers 400, and any other route answers a generic 400.
+
+    Args:
+        _error: The pydantic ``ValidationError``; unused because the message
+            depends on the route, not on the error details.
+
+    Returns:
+        A JSON ``Response`` with the matching status code.
+    """
+    path = request.path
+    payload = request.get_json(silent=True)
+
+    # Tracking: a missing device_id is an authentication problem (401),
+    # any other invalid field is a malformed request (400).
+    if path.startswith(("/api/v1/monitoring/", "/api/v1/control/")):
+        if isinstance(payload, dict) and not payload.get("device_id"):
+            return _json_error("Missing device_id", 401)
+        return _json_error("Invalid telemetry request", 400)
+
+    # Sync: device enrollment.
+    if path == "/api/v1/devices/enroll":
+        return _json_error("Invalid device enrollment request", 400)
+
+    # IAM and any other route.
+    return _json_error("Invalid request body", 400)
+
 def create_app() -> OpenAPI:
     """Build and configure the Edge application.
 
@@ -68,14 +120,15 @@ def create_app() -> OpenAPI:
         __name__,
         info=info,
         security_schemes=security_schemes,
+        validation_error_callback=_validation_error_callback,
         doc_ui={
             "swagger": True,
             "redoc": True,
             "rapidoc": True,
             "rapipdf": True,
             "scalar": True,
-            "elements": True
-        }
+            "elements": True,
+        },
     )
     app.config.from_mapping(load_config(Path(__file__).resolve().parent))
     configure_database(app.config["DATABASE_PATH"])
