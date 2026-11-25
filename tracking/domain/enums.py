@@ -30,7 +30,7 @@ class Metric(str, Enum):
     def device_types(self) -> frozenset[DeviceType]:
         """Types of the nodes that report the metric; only the luminosity has both."""
         if self is Metric.LUMINOSITY:
-            return frozenset(DeviceType)
+            return frozenset({DeviceType.ENVIRONMENTAL_DEVICE, DeviceType.CONTAINER_MONITOR})
         if self in (Metric.AIR_QUALITY, Metric.MOTION):
             return frozenset({DeviceType.ENVIRONMENTAL_DEVICE})
         return frozenset({DeviceType.CONTAINER_MONITOR})
