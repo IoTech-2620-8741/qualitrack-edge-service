@@ -137,6 +137,7 @@ class ActuationEventTestCase(unittest.TestCase):
 
         self.assertEqual(caused.sync_status, SyncStatus.PENDING)
         self.assertEqual(caused.trigger_state, EnvironmentalState.WARNING)
+        self.assertEqual(action(Metric.LUMINOSITY).trigger_metric, Metric.LUMINOSITY)
         self.assertIsNone(opened_by_rfid.trigger_metric)
 
     def test_rejects_an_incomplete_or_invalid_cause(self):
