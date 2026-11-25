@@ -103,7 +103,7 @@ Acceptance criteria:
   - Then the Edge returns `409 Conflict` and stores nothing of that request
 
 - Scenario: Invalid reading
-  - Given the body has no metric, a naive or missing `measured_at`, a time more than 5 minutes in the future, a non-finite value, a negative `profile_version`, a `luminosity` that is not a number, or unexpected fields such as `temperature`
+  - Given the body has no metric, a naive or missing `measured_at`, a time more than 5 minutes in the future, a non-finite value, a negative `profile_version`, a `luminosity` that is not a number of 0 or more, or unexpected fields such as `temperature`
   - When the Edge validates the request
   - Then the Edge returns `400 Bad Request` and stores nothing
 

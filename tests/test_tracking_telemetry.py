@@ -247,6 +247,7 @@ class TelemetryApiTestCase(unittest.TestCase):
             {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": "bright"},
             {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": "300"},
             {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": True},
+            {"device_id": "ENV-001", "measured_at": self.at(70), "luminosity": -0.1},
             {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": 400, "luminosity": float("inf")},
             {"device_id": "ENV-001", "measured_at": self.at(70), "temperature": 21.5},
             {"device_id": "ENV-001", "measured_at": self.at(70), "air_quality": 400, "profile_version": -1},
