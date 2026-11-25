@@ -47,6 +47,18 @@ from shared.interfaces.services import init_routes as init_health_routes
 
 
 def create_app() -> OpenAPI:
+    """Build and configure the Edge application.
+
+    Creates the ``OpenAPI`` app with its security schemes, loads the
+    configuration, prepares the database, composes the application services
+    and the anti-corruption layers of IAM, Tracking and Sync, optionally builds
+    the cloud gateways and the synchronization scheduler, seeds the test
+    device when configured, registers the routes of every bounded context and
+    adds the command groups.
+
+    Returns:
+        The configured ``OpenAPI`` application.
+    """
     info = Info(title="QualiTrack Edge Service API", version="1.0.0")
     security_schemes = {
         "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
@@ -69,7 +81,6 @@ def create_app() -> OpenAPI:
     configure_database(app.config["DATABASE_PATH"])
     init_db()
 
-    # 1. Inicializar los servicios primero para que estén listos
     iam_authentication_service = AuthApplicationService()
     app.extensions["iam_authentication_service"] = iam_authentication_service
     iam_anti_corruption_layer = IamAntiCorruptionLayer(iam_authentication_service)
@@ -130,6 +141,7 @@ def create_app() -> OpenAPI:
             app.config["TEST_DEVICE_API_KEY"],
         )
 
+
     init_iam_routes(app)
     init_tracking_routes(app)
     init_sync_routes(app)
@@ -140,6 +152,11 @@ def create_app() -> OpenAPI:
 
     @app.teardown_appcontext
     def close_database(_exception: BaseException | None) -> None:
+        """Close the database connection when the application context ends.
+
+        Args:
+            _exception: Exception that ended the context, if any; unused.
+        """
         if not db.is_closed():
             db.close()
 
@@ -147,6 +164,14 @@ def create_app() -> OpenAPI:
 
 
 def start_cloud_sync(app: OpenAPI) -> None:
+    """Start the cloud synchronization scheduler, if there is one.
+
+    Does nothing when the synchronization is disabled. In debug mode it starts
+    only in the reloader child process, so the scheduler does not run twice.
+
+    Args:
+        app: The application that holds the ``cloud_sync_scheduler`` extension.
+    """
     scheduler = app.extensions.get("cloud_sync_scheduler")
     if scheduler is None:
         return
