@@ -103,7 +103,7 @@ Acceptance criteria:
   - Then the Edge returns `409 Conflict` and stores nothing of that request
 
 - Scenario: Invalid reading
-  - Given the body has no metric, a naive or missing `measured_at`, a time more than 5 minutes in the future, a non-finite value, a negative `profile_version`, a container metric or unexpected fields
+  - Given the body has no metric, a naive or missing `measured_at`, a time more than 5 minutes in the future, a non-finite value, a negative `profile_version`, a `luminosity` that is not a number, or unexpected fields such as `temperature`
   - When the Edge validates the request
   - Then the Edge returns `400 Bad Request` and stores nothing
 
@@ -126,7 +126,7 @@ Acceptance criteria:
   - And the RFID tag is kept as the `text_value` of `RFID_TAG`
 
 - Scenario: Invalid reading
-  - Given a tag longer than 120 characters, a non-finite value or an environmental metric
+  - Given a tag longer than 120 characters, a non-finite value, or unexpected fields such as `air_quality` and `motion`
   - When the Edge validates the request
   - Then the Edge returns `400 Bad Request` and stores nothing
 

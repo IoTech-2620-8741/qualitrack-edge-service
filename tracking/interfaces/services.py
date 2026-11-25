@@ -180,7 +180,7 @@ def _record_readings(request_model, device_type: DeviceType):
 
 @tracking_api.route("/api/v1/monitoring/environment-readings", methods=["POST"])
 def create_environment_readings():
-    """Receive the air quality and motion the environmental device measured (TS55)."""
+    """Receive the air quality, luminosity and motion the environmental device measured (TS55)."""
     return _record_readings(EnvironmentReadingRequest, DeviceType.ENVIRONMENTAL_DEVICE)
 
 
