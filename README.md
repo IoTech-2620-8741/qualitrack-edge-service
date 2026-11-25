@@ -509,7 +509,7 @@ The three endpoints below share these rules:
 |---|---|
 | `201 Created` | something new was stored |
 | `200 OK` | identical retry |
-| `400 Bad Request` | invalid JSON, unknown fields, a missing or naive time, a future time, a non-finite value, motion other than `true`/`false`, a tag longer than 120 characters, an incomplete cause, or no metric at all |
+| `400 Bad Request` | invalid JSON, unknown fields, a missing or naive time, a future time, a non-finite value, motion other than `true`/`false`, a `luminosity` of the environmental device that is not a JSON number, a tag longer than 120 characters, an incomplete cause, or no metric at all |
 | `401 Unauthorized` | missing `device_id`, missing or invalid API key, unknown or revoked node |
 | `403 Forbidden` | the node type does not send that telemetry |
 | `409 Conflict` | the observation was already sent with different data |
