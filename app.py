@@ -1,9 +1,10 @@
 """Flask application entry point for the QualiTrack Edge Service.
 
-This module wires together the Flask application, registers the IAM, Tracking and Sync
-bounded-context Blueprints, the health Blueprint and the command groups, configures the SQLite
+This module wires together the ``flask_openapi3`` application, registers the IAM, Tracking and
+Sync bounded-context blueprints, the health blueprint and the command groups, configures the SQLite
 database, and composes the anti-corruption layers of Tracking and Sync with IAM and the
-cloud synchronization of the Sync context.
+cloud synchronization of the Sync context. The OpenAPI document and its viewers are served
+under ``/openapi/``.
 
 Typical usage::
 
@@ -18,15 +19,19 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
+
 from flask import jsonify, request
-from flask_openapi3 import OpenAPI, Info
+from flask_openapi3 import Info, OpenAPI
+
 from config import load_config
 from iam.application.services import AuthApplicationService
 from iam.interfaces.cli import devices_cli
+from iam.interfaces.services import init_routes as init_iam_routes
 from shared.infrastructure.cloud_session import CloudSession
 from shared.infrastructure.cloud_sync_scheduler import CloudSyncScheduler
 from shared.infrastructure.database import configure_database, database_available, db, init_db
 from shared.infrastructure.health import EdgeHealthCheck
+from shared.interfaces.services import init_routes as init_health_routes
 from sync.application.services import (
     DeviceRegistryApplicationService,
     ProfileSynchronizationApplicationService,
@@ -38,13 +43,18 @@ from sync.infrastructure.cloud_telemetry_gateway import CloudTelemetryGateway
 from sync.infrastructure.repositories import MonitoredDeviceRepository as MonitoredDeviceRepositoryImpl
 from sync.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer as SyncIamAntiCorruptionLayer
 from sync.interfaces.cli import cloud_cli
-from tracking.application.services import (EnvironmentalProfileApplicationService, TelemetryApplicationService,)
-from tracking.infrastructure.repositories import ( ActuationEventRepository as ActuationEventRepositoryImpl, EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl, TelemetryReadingRepository as TelemetryReadingRepositoryImpl,)
-from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
-from iam.interfaces.services import init_routes as init_iam_routes
-from tracking.interfaces.services import init_routes as init_tracking_routes
 from sync.interfaces.services import init_routes as init_sync_routes
-from shared.interfaces.services import init_routes as init_health_routes
+from tracking.application.services import (
+    EnvironmentalProfileApplicationService,
+    TelemetryApplicationService,
+)
+from tracking.infrastructure.repositories import (
+    ActuationEventRepository as ActuationEventRepositoryImpl,
+    EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl,
+    TelemetryReadingRepository as TelemetryReadingRepositoryImpl,
+)
+from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
+from tracking.interfaces.services import init_routes as init_tracking_routes
 
 
 def _json_error(message: str, status: int):
@@ -98,6 +108,7 @@ def _validation_error_callback(_error):
     # IAM and any other route.
     return _json_error("Invalid request body", 400)
 
+
 def create_app() -> OpenAPI:
     """Build and configure the Edge application.
 
@@ -120,6 +131,9 @@ def create_app() -> OpenAPI:
         __name__,
         info=info,
         security_schemes=security_schemes,
+        # The callback answers every validation failure with 400 (or 401 for a
+        # telemetry request without device_id), never with the default 422.
+        validation_error_status=400,
         validation_error_callback=_validation_error_callback,
         doc_ui={
             "swagger": True,
@@ -193,7 +207,6 @@ def create_app() -> OpenAPI:
             app.config["TEST_DEVICE_ID"],
             app.config["TEST_DEVICE_API_KEY"],
         )
-
 
     init_iam_routes(app)
     init_tracking_routes(app)
