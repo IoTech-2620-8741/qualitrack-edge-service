@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Tracking (tracking): `Metric.device_type` is replaced by `Metric.device_types` and `Metric.is_reported_by()`, because `LUMINOSITY` is reported by both node types. Only a container monitor still sends temperature, humidity, RFID tags and actions, and only the environmental device sends air quality and motion.
+- Tracking (tracking): `Metric.device_type` is replaced by `Metric.device_types`, because `LUMINOSITY` is reported by both node types. Only a container monitor still sends temperature, humidity, RFID tags and actions, and only the environmental device sends air quality and motion.
 
 ## [1.0.0] - 2026-11-15
 

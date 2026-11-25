@@ -96,8 +96,6 @@ class TelemetryReadingTestCase(unittest.TestCase):
             with self.subTest(device=device.device_type):
                 self.assertEqual(reading(device=device, metric=Metric.LUMINOSITY, value=300.0).value, 300.0)
         self.assertEqual([metric for metric in Metric if len(metric.device_types) > 1], [Metric.LUMINOSITY])
-        self.assertTrue(Metric.LUMINOSITY.is_reported_by(DeviceType.ENVIRONMENTAL_DEVICE))
-        self.assertFalse(Metric.TEMPERATURE.is_reported_by(DeviceType.ENVIRONMENTAL_DEVICE))
 
     def test_rejects_values_the_cloud_would_reject(self):
         """Non-finite values, booleans, invalid motion and long tags are rejected."""

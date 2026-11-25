@@ -35,10 +35,6 @@ class Metric(str, Enum):
             return frozenset({DeviceType.ENVIRONMENTAL_DEVICE})
         return frozenset({DeviceType.CONTAINER_MONITOR})
 
-    def is_reported_by(self, device_type: DeviceType) -> bool:
-        """Whether a node of ``device_type`` reports the metric."""
-        return device_type in self.device_types
-
     @property
     def is_text(self) -> bool:
         """Whether the reading is a text, such as an RFID tag."""

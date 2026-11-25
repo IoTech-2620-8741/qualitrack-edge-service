@@ -174,7 +174,6 @@ package "Tracking Bounded Context" #DEEAFF {
       RFID_TAG
       +device_types: frozenset[DeviceType]
       +has_thresholds: bool
-      +is_reported_by(device_type): bool
     }
 
     enum SyncStatus {
