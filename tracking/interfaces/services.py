@@ -1,8 +1,17 @@
 """Interface (REST API) layer for the Tracking bounded context.
 
-This module exposes the REST endpoints of the Tracking context: the submission
-of environmental and container-monitor readings, the submission of actuation
-events and the reading of the configuration of a device.
+Exposes an ``APIBlueprint`` (``tracking_api``) that receives the readings and
+actions of the nodes (TS55, TS56, TS57) and hands each node its configuration
+(TS58, TS59). It translates the requests into calls to the application
+services and maps the results back to JSON responses. This layer owns no
+domain logic.
+
+Each telemetry request carries the ``device_id`` of the node in the body and
+its API key in the ``X-API-Key`` header or as an ``Authorization: Bearer``
+token. Responses: ``201`` when something new is stored, ``200`` for an
+identical retry, ``400`` for invalid data, ``401`` for missing or rejected
+credentials, ``403`` when the node type does not send that telemetry, ``409``
+when a retry changes a stored observation and ``415`` for a non-JSON request.
 
 Request bodies are validated by ``flask_openapi3`` through the typed ``body``
 parameter of each view. Validation failures are translated into the project's
@@ -69,9 +78,12 @@ class EnvironmentReadingRequest(_TelemetryRequest):
             converted to ``1.0`` (detected) or ``0.0`` (not detected).
         """
         values = {}
-        if self.air_quality is not None: values[Metric.AIR_QUALITY] = self.air_quality
-        if self.luminosity is not None: values[Metric.LUMINOSITY] = self.luminosity
-        if self.motion is not None: values[Metric.MOTION] = 1.0 if self.motion else 0.0
+        if self.air_quality is not None:
+            values[Metric.AIR_QUALITY] = self.air_quality
+        if self.luminosity is not None:
+            values[Metric.LUMINOSITY] = self.luminosity
+        if self.motion is not None:
+            values[Metric.MOTION] = 1.0 if self.motion else 0.0
         return values
 
 
@@ -268,15 +280,19 @@ def _node_api_key() -> str | None:
     """Extract the API key sent by the node.
 
     The key is read first from the ``X-API-Key`` header. If it is missing, the
-    ``Authorization`` header is checked for a ``Bearer`` token.
+    ``Authorization`` header is checked for a ``Bearer`` token: nodes built on
+    the Modest IoT Nano Framework send the key with its ``HttpGatewayClient``,
+    which can only set the ``Authorization`` header (ADR-0018).
 
     Returns:
         The API key, or ``None`` if the request does not carry a usable one.
     """
     api_key = request.headers.get("X-API-Key")
-    if api_key: return api_key
+    if api_key:
+        return api_key
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-    if scheme.lower() != "bearer": return None
+    if scheme.lower() != "bearer":
+        return None
     return token.strip() or None
 
 
@@ -366,6 +382,7 @@ def require_json_content_type():
     """
     if request.method == "POST" and not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 415
+    return None
 
 
 def _record_readings(body, device_type: DeviceType):
@@ -416,7 +433,7 @@ def _record_readings(body, device_type: DeviceType):
                401: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
 def create_environment_readings(body: EnvironmentReadingRequest):
-    """Record the readings sent by an environmental device."""
+    """Receive the air quality, luminosity and motion the environmental device measured (TS55)."""
     return _record_readings(body, DeviceType.ENVIRONMENTAL_DEVICE)
 
 
@@ -429,7 +446,7 @@ def create_environment_readings(body: EnvironmentReadingRequest):
                401: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
 def create_container_readings(body: ContainerReadingRequest):
-    """Record the readings sent by a container monitor."""
+    """Receive the temperature, humidity, luminosity and RFID tag of a container monitor (TS56)."""
     return _record_readings(body, DeviceType.CONTAINER_MONITOR)
 
 
@@ -442,7 +459,7 @@ def create_container_readings(body: ContainerReadingRequest):
                401: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
 def create_actuation_event(body: ActuationEventRequest):
-    """Record an action performed by a container monitor.
+    """Receive an action a container monitor executed (TS57).
 
     Returns 201 when the event is new and 200 when it was already stored.
     """
@@ -473,9 +490,11 @@ def create_actuation_event(body: ActuationEventRequest):
     responses={200: ConfigurationResponse, 401: ErrorResponse, 404: ErrorResponse},
 )
 def get_configuration(path: DevicePath):
-    """Return the thresholds and actuation rules cached for a device.
+    """Hand a node the profile it applies (TS58 for the environmental device, TS59 for a container monitor).
 
-    Responds 404 when the Edge has not synchronized a profile for it yet.
+    The node identifies itself with its ``device_id`` in the path and its API
+    key, so it can only read its own configuration. Responds 404 while the
+    Edge has no profile of the cloud for the node.
     """
     api_key = _node_api_key()
     if not api_key:

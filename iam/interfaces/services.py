@@ -57,7 +57,9 @@ def _node_api_key() -> str | None:
     """Extract the API key sent by the node.
 
     The key is read first from the ``X-API-Key`` header. If it is missing, the
-    ``Authorization`` header is checked for a ``Bearer`` token.
+    ``Authorization`` header is checked for a ``Bearer`` token: nodes built on
+    the Modest IoT Nano Framework send the key with its ``HttpGatewayClient``,
+    which can only set the ``Authorization`` header (ADR-0018).
 
     Returns:
         The API key, or ``None`` if the request does not carry a usable one.
@@ -84,6 +86,7 @@ def require_json_content_type():
     """
     if request.method == "POST" and not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 415
+    return None
 
 
 @iam_api.post(
@@ -93,8 +96,16 @@ def require_json_content_type():
     security=SECURITY,
     responses={200: SignInResponse, 400: ErrorResponse, 401: ErrorResponse, 415: ErrorResponse},
 )
-def sign_in(body: SignInRequest):
-    """Authenticate a registered device with its API key."""
+def sign_in_device(body: SignInRequest):
+    """Sign in an environmental device or a container monitor (TS53, TS54).
+
+    The device identity is supplied in the JSON body and its API key in the
+    ``X-API-Key`` header or as an ``Authorization: Bearer`` token. Device
+    registration, credential rotation and revocation are not exposed over HTTP.
+    Responses: ``200`` when the registered device is active and the credential
+    matches, ``400`` for an invalid body, ``401`` for missing or rejected
+    credentials and ``415`` for a non-JSON request.
+    """
     # The API key is checked after the body, so an invalid body is always a 400.
     api_key = _node_api_key()
     if not api_key:

@@ -147,5 +147,45 @@ class IamApiTestCase(unittest.TestCase):
         self.assertEqual(stored.device_type, "ENVIRONMENTAL_DEVICE")
 
 
+class OpenApiDocumentTestCase(unittest.TestCase):
+    """Tests the OpenAPI document that ``flask_openapi3`` serves under ``/openapi/``."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = create_app()
+        cls.document = cls.app.test_client().get("/openapi/openapi.json").json
+
+    def test_documents_every_route_of_the_edge(self):
+        """The document lists the seven routes of the Edge."""
+        self.assertEqual(
+            sorted(self.document["paths"]),
+            [
+                "/api/v1/auth/sign-in",
+                "/api/v1/configurations/{device_id}",
+                "/api/v1/control/actuation-events",
+                "/api/v1/devices/enroll",
+                "/api/v1/health",
+                "/api/v1/monitoring/container-readings",
+                "/api/v1/monitoring/environment-readings",
+            ],
+        )
+
+    def test_documents_the_validation_errors_as_400_not_422(self):
+        """No operation documents the 422 the Edge never answers."""
+        for path, operations in self.document["paths"].items():
+            for method, operation in operations.items():
+                self.assertNotIn("422", operation["responses"], f"{method.upper()} {path}")
+
+    def test_documents_the_allowed_device_types_of_the_enrollment(self):
+        """The enrollment body lists the device types the cloud registers."""
+        schemas = self.document["components"]["schemas"]
+
+        self.assertEqual(
+            schemas["EnrollDeviceRequest"]["properties"]["device_type"]["$ref"],
+            "#/components/schemas/DeviceType",
+        )
+        self.assertEqual(schemas["DeviceType"]["enum"], ["ENVIRONMENTAL_DEVICE", "CONTAINER_MONITOR"])
+
+
 if __name__ == "__main__":
     unittest.main()

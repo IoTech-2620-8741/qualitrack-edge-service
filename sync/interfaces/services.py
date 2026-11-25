@@ -1,8 +1,8 @@
 """Interface (REST API) layer for the Sync bounded context.
 
-This module exposes the REST endpoints of the Sync context. It currently offers
-the enrollment of a device from the cached cloud registry, which returns the API
-key the node must use in later requests.
+Exposes an ``APIBlueprint`` (``sync_api``) with the enrollment of the nodes the
+cached cloud registry assigns to this Edge (development only, ADR-0014). This
+layer owns no domain logic.
 
 Request bodies are validated by ``flask_openapi3`` through the typed ``body``
 parameter of the view. Validation failures are translated into the project's
@@ -12,8 +12,9 @@ error format by the callback registered in ``app.py``.
 from flask import current_app, jsonify, request
 from flask_openapi3 import APIBlueprint, Tag
 from pydantic import BaseModel, ConfigDict, Field
+
+from sync.application.errors import DeviceAlreadyEnrolled, DeviceEnrollmentNotAllowed
 from tracking.domain.enums import DeviceType
-from sync.infrastructure.repositories import MonitoredDeviceRepository
 
 sync_api = APIBlueprint("sync_api", __name__)
 SYNC_TAG = Tag(name="Sync", description="Cloud synchronization")
@@ -28,8 +29,9 @@ class EnrollDeviceRequest(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    device_id: str = Field(..., min_length=1, description="External identifier registered in the cloud.")
-    device_type: str = Field(..., description="IoT device type registered in the cloud.")
+
+    device_id: str = Field(..., min_length=1, max_length=50, description="External identifier registered in the cloud.")
+    device_type: DeviceType = Field(..., description="IoT device type registered in the cloud.")
 
 
 class EnrollResponse(BaseModel):
@@ -42,7 +44,7 @@ class EnrollResponse(BaseModel):
     """
 
     device_id: str
-    device_type: str
+    device_type: DeviceType
     api_key: str
 
 
@@ -57,18 +59,24 @@ class ErrorResponse(BaseModel):
 
 
 @sync_api.before_request
-def require_json_content_type():
-    """Reject POST requests whose content type is not JSON.
+def reject_unsupported_requests():
+    """Reject enrollment outside development and requests that are not JSON.
 
-    It runs before the body validation of ``flask_openapi3``, so a wrong
-    ``Content-Type`` is answered with 415 instead of a validation error.
+    It runs before the body validation of ``flask_openapi3``, so outside
+    development every request is answered with 403 whatever its body, and a
+    wrong ``Content-Type`` is answered with 415 instead of a validation error.
 
     Returns:
-        A 415 error response when the request is not JSON, otherwise ``None``
-        so the request continues normally.
+        A 403 or 415 error response, otherwise ``None`` so the request
+        continues normally.
     """
+    # Enrollment based on public identifiers must not be exposed as an
+    # unrestricted production endpoint.
+    if current_app.config["APP_ENV"] != "development":
+        return jsonify({"error": "Unverified device enrollment is disabled"}), 403
     if request.method == "POST" and not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 415
+    return None
 
 
 @sync_api.post(
@@ -78,50 +86,33 @@ def require_json_content_type():
     responses={201: EnrollResponse, 400: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
 def enroll_device(body: EnrollDeviceRequest):
-    """Enroll a device that exists in the cached cloud registry.
+    """Enroll an IoT device using the cached cloud registry (development only).
 
-    Only available in the development environment. Returns 201 with the new
-    API key, 400 for an unknown device type, 403 when enrollment is disabled
-    or the device is not authorized, and 409 when it is already enrolled.
+    The ESP32 provides its device identifier and type. Sync verifies that the
+    cached cloud registry authorizes the device, then asks IAM to generate its
+    API key. Responses: ``201`` with the API key, ``400`` for an invalid
+    request, ``403`` when enrollment is disabled or the device is not
+    authorized, ``409`` when local IAM already has the device and ``415`` for
+    a non-JSON request.
     """
-    # Enrollment without verification is only allowed in development.
-    if current_app.config["APP_ENV"] != "development":
-        return jsonify({"error": "Unverified device enrollment is disabled"}), 403
-
-    # The device type arrives as free text; it must match a known DeviceType.
-    try:
-        device_type = DeviceType(body.device_type)
-    except ValueError:
-        return jsonify({"error": "Invalid device enrollment request"}), 400
-
     try:
         api_key = current_app.extensions["device_registry_service"].enroll_device(
-            body.device_id, device_type,
+            body.device_id,
+            body.device_type,
         )
-    except Exception as e:
-        msg = str(e).lower()
+    except DeviceEnrollmentNotAllowed:
+        return jsonify({"error": "Device is not authorized for enrollment"}), 403
+    except DeviceAlreadyEnrolled:
+        return jsonify({"error": "Device is already registered"}), 409
 
-        # The error message says the device already exists: duplicate (409).
-        if any(kw in msg for kw in ["already", "exist", "duplicate", "registered", "conflict"]):
-            return jsonify({"error": str(e)}), 409
-
-        # The device is already in the local cache: also a duplicate (409).
-        repo = MonitoredDeviceRepository()
-        try:
-            if repo.find_by_device_id(body.device_id) is not None:
-                return jsonify({"error": str(e)}), 409
-        except Exception:
-            # If the cache check fails, assume the device is not cached.
-            pass
-
-        # Any other failure means the device is not authorized (403).
-        return jsonify({"error": str(e)}), 403
-
-    return jsonify({
+    response = jsonify({
         "device_id": body.device_id,
-        "device_type": device_type.value,
+        "device_type": body.device_type.value,
         "api_key": api_key,
-    }), 201
+    })
+    # The response carries the API key of the node: no cache may keep it.
+    response.headers["Cache-Control"] = "no-store"
+    return response, 201
 
 
 def init_routes(app):

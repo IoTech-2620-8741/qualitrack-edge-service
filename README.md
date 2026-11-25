@@ -172,6 +172,7 @@ node-to-Edge and Edge-to-cloud interactions.
 
 - Python 3.13+
 - Flask
+- flask-openapi3 (OpenAPI document and its viewers)
 - Peewee
 - Pydantic
 - python-dotenv
@@ -377,6 +378,10 @@ docker compose up -d --build
 file to check the service, its health check, the commands and the volume.
 
 ## API Contract
+
+With the service running, the OpenAPI document of these routes is served at
+`/openapi/openapi.json`, and `/openapi/` lists its viewers: Swagger UI
+(`/openapi/swagger`), ReDoc, RapiDoc, RapiPDF, Scalar and Elements.
 
 ### Check the health of the Edge
 
