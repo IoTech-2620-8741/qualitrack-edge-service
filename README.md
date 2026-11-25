@@ -8,7 +8,7 @@ Domain-Driven Design (DDD) approach.
 The QualiTrack nodes are:
 
 - the **environmental device** (`ENVIRONMENTAL_DEVICE`), which monitors the air
-  quality and motion of an environment;
+  quality, luminosity and motion of an environment;
 - the **container monitor** (`CONTAINER_MONITOR`), which monitors the
   temperature, humidity, luminosity and RFID access of a container and acts
   on its fan and servo.
@@ -30,7 +30,7 @@ The QualiTrack nodes are:
   - local copy of the cloud registry of the nodes the cloud assigns to this
     Edge Gateway (environment and cloud identifiers of each node), refreshed
     by a background thread and by `flask cloud sync`
-  - reception of the air quality and motion of the environmental device
+  - reception of the air quality, luminosity and motion of the environmental device
     (TS55), of the temperature, humidity, luminosity and RFID tags of the
     container monitor (TS56), and of the actions of the container monitor
     (TS57), validated with the rules of the cloud
@@ -509,7 +509,7 @@ The three endpoints below share these rules:
 |---|---|
 | `201 Created` | something new was stored |
 | `200 OK` | identical retry |
-| `400 Bad Request` | invalid JSON, unknown fields, a missing or naive time, a future time, a non-finite value, motion other than `true`/`false`, a tag longer than 120 characters, an incomplete cause, or no metric at all |
+| `400 Bad Request` | invalid JSON, unknown fields, a missing or naive time, a future time, a non-finite value, motion other than `true`/`false`, a `luminosity` of the environmental device that is not a JSON number of 0 or more, a tag longer than 120 characters, an incomplete cause, or no metric at all |
 | `401 Unauthorized` | missing `device_id`, missing or invalid API key, unknown or revoked node |
 | `403 Forbidden` | the node type does not send that telemetry |
 | `409 Conflict` | the observation was already sent with different data |
@@ -525,13 +525,15 @@ The three endpoints below share these rules:
   "measured_at": "2026-11-03T10:15:00-05:00",
   "profile_version": 3,
   "air_quality": 412.5,
+  "luminosity": 300.0,
   "motion": true
 }
 ```
 
-`air_quality` is in ppm and `motion` is `true` when motion is detected and
-`false` when the zone is quiet again. Each one is optional, but a reading needs
-at least one.
+`air_quality` is in ppm, `luminosity` is the light of the room in lux and
+`motion` is `true` when motion is detected and `false` when the zone is quiet
+again. Each one is optional, but a reading needs at least one. The luminosity
+is the only metric both node types report.
 
 ```json
 {
@@ -540,7 +542,8 @@ at least one.
   "profile_version": 3,
   "readings": [
     {"id": 1, "metric": "AIR_QUALITY", "value": 412.5, "text_value": null, "sync_status": "PENDING"},
-    {"id": 2, "metric": "MOTION", "value": 1.0, "text_value": null, "sync_status": "PENDING"}
+    {"id": 2, "metric": "LUMINOSITY", "value": 300.0, "text_value": null, "sync_status": "PENDING"},
+    {"id": 3, "metric": "MOTION", "value": 1.0, "text_value": null, "sync_status": "PENDING"}
   ]
 }
 ```

@@ -13,10 +13,10 @@ class DeviceType(str, Enum):
 class Metric(str, Enum):
     """Variables the nodes report, with the same names and rules as the cloud.
 
-    The environmental device reports the air quality in ppm and motion events
-    (1 when detected, 0 when the zone is quiet again). The container monitor
-    reports temperature in °C, relative humidity in %, luminosity in lux and
-    the RFID tags read on the container.
+    The environmental device reports the air quality in ppm, the luminosity of
+    the room in lux and motion events (1 when detected, 0 when the zone is
+    quiet again). The container monitor reports temperature in °C, relative
+    humidity in %, luminosity in lux and the RFID tags read on the container.
     """
 
     AIR_QUALITY = "AIR_QUALITY"
@@ -27,11 +27,13 @@ class Metric(str, Enum):
     RFID_TAG = "RFID_TAG"
 
     @property
-    def device_type(self) -> DeviceType:
-        """Type of the node that reports the metric."""
+    def device_types(self) -> frozenset[DeviceType]:
+        """Types of the nodes that report the metric; only the luminosity has both."""
+        if self is Metric.LUMINOSITY:
+            return frozenset({DeviceType.ENVIRONMENTAL_DEVICE, DeviceType.CONTAINER_MONITOR})
         if self in (Metric.AIR_QUALITY, Metric.MOTION):
-            return DeviceType.ENVIRONMENTAL_DEVICE
-        return DeviceType.CONTAINER_MONITOR
+            return frozenset({DeviceType.ENVIRONMENTAL_DEVICE})
+        return frozenset({DeviceType.CONTAINER_MONITOR})
 
     @property
     def is_text(self) -> bool:
