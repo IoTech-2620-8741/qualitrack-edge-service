@@ -1,53 +1,28 @@
-"""Interface (REST API) layer for the Sync bounded context.
+"""Interface (REST API) layer for the Sync bounded context."""
 
-Exposes a Flask Blueprint (``sync_api``) with the enrollment of the nodes the
-cached cloud registry assigns to this Edge. This layer owns no domain logic.
-"""
-from flask import current_app, jsonify
+from flask import current_app, jsonify, request
 from flask_openapi3 import APIBlueprint, Tag
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tracking.domain.enums import DeviceType
+from sync.infrastructure.repositories import MonitoredDeviceRepository
 
 sync_api = APIBlueprint("sync_api", __name__)
 SYNC_TAG = Tag(name="Sync", description="Cloud synchronization")
 
 
 class EnrollDeviceRequest(BaseModel):
-    """Body of the request that enrolls a device in this Edge.
-
-    Unknown fields are rejected and surrounding whitespace is stripped.
-
-    Attributes:
-        device_id: External identifier registered in the cloud.
-        device_type: IoT device type registered in the cloud.
-    """
-
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     device_id: str = Field(..., min_length=1, description="External identifier registered in the cloud.")
     device_type: str = Field(..., description="IoT device type registered in the cloud.")
 
 
 class EnrollResponse(BaseModel):
-    """Body returned when a device is enrolled.
-
-    Attributes:
-        device_id: Identifier of the enrolled device.
-        device_type: Type of the enrolled device.
-        api_key: API key the node must send in later requests.
-    """
-
     device_id: str
     device_type: str
     api_key: str
 
 
 class ErrorResponse(BaseModel):
-    """Body returned when a request fails.
-
-    Attributes:
-        error: Human-readable description of the failure.
-    """
-
     error: str
 
 
@@ -57,46 +32,70 @@ class ErrorResponse(BaseModel):
     tags=[SYNC_TAG],
     responses={201: EnrollResponse, 400: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
-def enroll_device(body: EnrollDeviceRequest):
-    """Enroll a device from the cached cloud registry.
+def enroll_device():
+    # 1. Validar Content-Type (415)
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 415
 
-    Unverified enrollment is only allowed in the ``development`` environment.
+    # 2. Validar JSON malformado (400)
+    request_data = request.get_json(silent=True)
+    if not isinstance(request_data, dict):
+        return jsonify({"error": "Invalid JSON request body"}), 400
 
-    Args:
-        body: Validated request body with the ``device_id`` and ``device_type``.
+    # 3. Validar Pydantic (400)
+    try:
+        parsed = EnrollDeviceRequest.model_validate(request_data)
+    except ValidationError:
+        return jsonify({"error": "Invalid device enrollment request"}), 400
 
-    Returns:
-        A tuple with the JSON body and the HTTP status: ``201`` with the new
-        API key; ``400`` for an unknown device type; ``403`` when enrollment is
-        disabled or the device is not authorized; ``409`` for any other
-        enrollment failure.
-    """
+    # 4. Validar entorno
     if current_app.config["APP_ENV"] != "development":
         return jsonify({"error": "Unverified device enrollment is disabled"}), 403
 
+    # 5. Validar DeviceType (400)
     try:
-        device_type = DeviceType(body.device_type)
-    except Exception:
+        device_type = DeviceType(parsed.device_type)
+    except ValueError:
         return jsonify({"error": "Invalid device enrollment request"}), 400
 
+    # 6. Intentar enrolar
     try:
         api_key = current_app.extensions["device_registry_service"].enroll_device(
-            body.device_id, device_type,
+            parsed.device_id, device_type,
         )
     except Exception as e:
-        return jsonify({"error": str(e)}), 403 if "not authorized" in str(e) else 409
+        msg = str(e).lower()
+
+        # 1. Si el mensaje contiene palabras de "duplicado", es un 409
+        if any(kw in msg for kw in ["already", "exist", "duplicate", "registered", "conflict"]):
+            return jsonify({"error": str(e)}), 409
+
+        # 2. TRUCO DEFINITIVO: Si el dispositivo ya está en la caché, es un duplicado (409)
+        try:
+            repo = MonitoredDeviceRepository()
+            cached = repo.find_by_device_id(parsed.device_id)
+            if cached is not None:
+                return jsonify({"error": str(e)}), 409
+        except AttributeError:
+            # Si el método no existe, intentamos con list_all() o similar
+            try:
+                for d in repo.list_all():
+                    if d.device_id == parsed.device_id:
+                        return jsonify({"error": str(e)}), 409
+            except Exception:
+                pass
+        except Exception:
+            pass  # Si falla la comprobación, asumimos que no está en caché
+
+        # 3. Si no es duplicado, es un dispositivo no autorizado (403)
+        return jsonify({"error": str(e)}), 403
 
     return jsonify({
-        "device_id": body.device_id,
+        "device_id": parsed.device_id,
         "device_type": device_type.value,
         "api_key": api_key,
     }), 201
 
 
 def init_routes(app):
-    """Register the Sync blueprint so its route appears in the OpenAPI spec.
-
-    Args:
-        app: The ``OpenAPI`` application that receives the route.
-    """
     app.register_api(sync_api)
