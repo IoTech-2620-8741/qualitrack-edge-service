@@ -1,8 +1,17 @@
-"""Interface (REST API) layer for the Tracking bounded context."""
+"""Interface (REST API) layer for the Tracking bounded context.
+
+This module exposes the REST endpoints of the Tracking context: the submission
+of environmental and container-monitor readings, the submission of actuation
+events and the reading of the configuration of a device.
+
+Request bodies are validated by ``flask_openapi3`` through the typed ``body``
+parameter of each view. Validation failures are translated into the project's
+error format by the callback registered in ``app.py``.
+"""
 
 from flask import current_app, jsonify, request
 from flask_openapi3 import APIBlueprint, Tag
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from tracking.application.errors import (
     ConfigurationNotAvailable,
@@ -25,18 +34,40 @@ SECURITY = [{"ApiKeyAuth": []}, {"BearerAuth": []}]
 
 # ---------- Requests ----------
 class _TelemetryRequest(BaseModel):
+    """Base body shared by every request sent by a node.
+
+    Attributes:
+        device_id: Identifier of the node that sends the data.
+        profile_version: Version of the profile the node had applied, if any.
+    """
+
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     device_id: str = Field(..., min_length=1, description="Identifier of the node.")
     profile_version: int | None = Field(None, ge=0, description="Profile version the node applied.")
 
 
 class EnvironmentReadingRequest(_TelemetryRequest):
+    """Body of the environmental readings request.
+
+    Attributes:
+        measured_at: Time of the measurement, with timezone offset.
+        air_quality: Air quality in ppm.
+        luminosity: Luminosity of the room in lux.
+        motion: Whether motion was detected.
+    """
+
     measured_at: AwareDatetime = Field(..., description="ISO 8601 measurement time with offset.")
     air_quality: float | None = Field(None, description="Air quality in ppm.")
     luminosity: float | None = Field(None, ge=0, strict=True, description="Luminosity of the room in lux.")
     motion: bool | None = Field(None, description="Whether motion was detected.")
 
     def values(self) -> dict[Metric, float]:
+        """Collect the metrics that were actually sent.
+
+        Returns:
+            A mapping from each present metric to its numeric value. Motion is
+            converted to ``1.0`` (detected) or ``0.0`` (not detected).
+        """
         values = {}
         if self.air_quality is not None: values[Metric.AIR_QUALITY] = self.air_quality
         if self.luminosity is not None: values[Metric.LUMINOSITY] = self.luminosity
@@ -45,6 +76,16 @@ class EnvironmentReadingRequest(_TelemetryRequest):
 
 
 class ContainerReadingRequest(_TelemetryRequest):
+    """Body of the container-monitor readings request.
+
+    Attributes:
+        measured_at: Time of the measurement, with timezone offset.
+        temperature: Temperature in °C.
+        humidity: Relative humidity in %.
+        luminosity: Luminosity in lux.
+        rfid_tag: RFID tag that was read.
+    """
+
     measured_at: AwareDatetime = Field(..., description="ISO 8601 measurement time with offset.")
     temperature: float | None = Field(None, description="Temperature in °C.")
     humidity: float | None = Field(None, description="Relative humidity in %.")
@@ -52,6 +93,12 @@ class ContainerReadingRequest(_TelemetryRequest):
     rfid_tag: str | None = Field(None, min_length=1, max_length=120, description="RFID tag read.")
 
     def values(self) -> dict[Metric, float | str]:
+        """Collect the metrics that were actually sent.
+
+        Returns:
+            A mapping from each present metric to its value. Numeric metrics
+            keep their number and the RFID tag keeps its text.
+        """
         candidates = {
             Metric.TEMPERATURE: self.temperature,
             Metric.HUMIDITY: self.humidity,
@@ -62,6 +109,16 @@ class ContainerReadingRequest(_TelemetryRequest):
 
 
 class ActuationEventRequest(_TelemetryRequest):
+    """Body of the actuation event request.
+
+    Attributes:
+        action: Action the node performed.
+        trigger_metric: Metric that caused the action, if any.
+        trigger_state: Environmental state that caused the action, if any.
+        result: Outcome of the action; ``EXECUTED`` by default.
+        occurred_at: Time of the action, with timezone offset.
+    """
+
     action: ActuationAction
     trigger_metric: Metric | None = Field(None, description="Metric that caused the action.")
     trigger_state: EnvironmentalState | None = Field(None, description="State that caused the action.")
@@ -70,11 +127,27 @@ class ActuationEventRequest(_TelemetryRequest):
 
 
 class DevicePath(BaseModel):
+    """Path parameters of the configuration endpoint.
+
+    Attributes:
+        device_id: Identifier of the node whose configuration is requested.
+    """
+
     device_id: str = Field(..., description="Identifier of the node.")
 
 
 # ---------- Responses ----------
 class ReadingResource(BaseModel):
+    """A single stored reading.
+
+    Attributes:
+        id: Identifier of the reading.
+        metric: Name of the measured metric.
+        value: Numeric value, when the metric is numeric.
+        text_value: Text value, when the metric is textual (for example RFID).
+        sync_status: Synchronization status with the cloud.
+    """
+
     id: int | str
     metric: str
     value: float | None = None
@@ -83,6 +156,15 @@ class ReadingResource(BaseModel):
 
 
 class ReadingsResponse(BaseModel):
+    """Body returned after the readings are recorded.
+
+    Attributes:
+        device_id: Identifier of the node that sent the readings.
+        measured_at: Time of the measurement in ISO 8601.
+        profile_version: Profile version the node reported, if any.
+        readings: The readings that were recorded.
+    """
+
     device_id: str
     measured_at: str
     profile_version: int | None = None
@@ -90,6 +172,20 @@ class ReadingsResponse(BaseModel):
 
 
 class ActuationEventResponse(BaseModel):
+    """Body returned after an actuation event is recorded.
+
+    Attributes:
+        id: Identifier of the event.
+        device_id: Identifier of the node that sent the event.
+        action: Action that was performed.
+        trigger_metric: Metric that caused the action, if any.
+        trigger_state: State that caused the action, if any.
+        result: Outcome of the action.
+        occurred_at: Time of the action in ISO 8601.
+        profile_version: Profile version the node reported, if any.
+        sync_status: Synchronization status with the cloud.
+    """
+
     id: int | str
     device_id: str
     action: str
@@ -102,6 +198,17 @@ class ActuationEventResponse(BaseModel):
 
 
 class ThresholdResource(BaseModel):
+    """Normal and critical limits of a metric.
+
+    Attributes:
+        metric: Name of the metric.
+        unit: Unit of measurement, if any.
+        normal_min: Lower limit of the normal range.
+        normal_max: Upper limit of the normal range.
+        critical_min: Lower critical limit.
+        critical_max: Upper critical limit.
+    """
+
     metric: str
     unit: str | None = None
     normal_min: float | None = None
@@ -111,12 +218,32 @@ class ThresholdResource(BaseModel):
 
 
 class ActuationRuleResource(BaseModel):
+    """Rule that links an environmental state to an action.
+
+    Attributes:
+        metric: Metric the rule watches.
+        state: State that triggers the rule.
+        action: Action the node must perform.
+    """
+
     metric: str
     state: str
     action: str
 
 
 class ConfigurationResponse(BaseModel):
+    """Configuration of a device, built from its cached profile.
+
+    Attributes:
+        device_id: Identifier of the device.
+        device_type: Type of the device.
+        profile_version: Version of the profile.
+        thresholds: Limits of each metric.
+        actuation_rules: Rules the node must apply.
+        updated_at: Time of the last update in the cloud, if known.
+        synced_at: Time the Edge synchronized the profile.
+    """
+
     device_id: str
     device_type: str
     profile_version: int
@@ -127,11 +254,25 @@ class ConfigurationResponse(BaseModel):
 
 
 class ErrorResponse(BaseModel):
+    """Body returned when a request fails.
+
+    Attributes:
+        error: Human-readable description of the error.
+    """
+
     error: str
 
 
 # ---------- Helpers ----------
 def _node_api_key() -> str | None:
+    """Extract the API key sent by the node.
+
+    The key is read first from the ``X-API-Key`` header. If it is missing, the
+    ``Authorization`` header is checked for a ``Bearer`` token.
+
+    Returns:
+        The API key, or ``None`` if the request does not carry a usable one.
+    """
     api_key = request.headers.get("X-API-Key")
     if api_key: return api_key
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
@@ -140,10 +281,26 @@ def _node_api_key() -> str | None:
 
 
 def _iso(value) -> str:
+    """Format a datetime as ISO 8601, using ``Z`` for UTC.
+
+    Args:
+        value: The datetime to format.
+
+    Returns:
+        The ISO 8601 string.
+    """
     return value.isoformat().replace("+00:00", "Z")
 
 
 def _reading_resource(reading) -> dict:
+    """Convert a domain reading into its response representation.
+
+    Args:
+        reading: The telemetry reading from the domain.
+
+    Returns:
+        A dictionary that matches ``ReadingResource``.
+    """
     return {
         "id": reading.id, "metric": reading.metric.value, "value": reading.value,
         "text_value": reading.text_value, "sync_status": reading.sync_status.value,
@@ -151,6 +308,14 @@ def _reading_resource(reading) -> dict:
 
 
 def _event_resource(event) -> dict:
+    """Convert a domain actuation event into its response representation.
+
+    Args:
+        event: The actuation event from the domain.
+
+    Returns:
+        A dictionary that matches ``ActuationEventResponse``.
+    """
     return {
         "id": event.id, "device_id": event.device_id, "action": event.action.value,
         "trigger_metric": None if event.trigger_metric is None else event.trigger_metric.value,
@@ -162,6 +327,14 @@ def _event_resource(event) -> dict:
 
 
 def _configuration_resource(configuration) -> dict:
+    """Convert a device configuration into its response representation.
+
+    Args:
+        configuration: The configuration returned by the profile service.
+
+    Returns:
+        A dictionary that matches ``ConfigurationResponse``.
+    """
     profile = configuration.profile
     return {
         "device_id": profile.device_id, "device_type": configuration.device_type.value,
@@ -180,31 +353,44 @@ def _configuration_resource(configuration) -> dict:
     }
 
 
-def _parse(request_model):
-    if not request.is_json:
-        return None, None, (jsonify({"error": "Content-Type must be application/json"}), 415)
-    request_data = request.get_json(silent=True)
-    if not isinstance(request_data, dict):
-        return None, None, (jsonify({"error": "Invalid JSON request body"}), 400)
-    if not request_data.get("device_id"):
-        return None, None, (jsonify({"error": "Missing device_id"}), 401)
-    try:
-        parsed = request_model.model_validate(request_data)
-    except ValidationError:
-        return None, None, (jsonify({"error": "Invalid telemetry request"}), 400)
+@tracking_api.before_request
+def require_json_content_type():
+    """Reject POST requests whose content type is not JSON.
+
+    It runs before the body validation of ``flask_openapi3``, so a wrong
+    ``Content-Type`` is answered with 415 instead of a validation error.
+
+    Returns:
+        A 415 error response when the request is not JSON, otherwise ``None``
+        so the request continues normally.
+    """
+    if request.method == "POST" and not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 415
+
+
+def _record_readings(body, device_type: DeviceType):
+    """Record the readings of a node and build the HTTP response.
+
+    Shared by the environmental and container-monitor endpoints. The body is
+    already validated, so only the API key and the business errors are handled.
+
+    Args:
+        body: The validated readings request.
+        device_type: Type of node that is allowed to send these readings.
+
+    Returns:
+        A tuple with the JSON response and the status code: 201 when the
+        readings are new, 200 when they were already stored, 401 for missing or
+        invalid credentials, 403 for a wrong device type, 409 for conflicting
+        values and 400 for domain validation errors.
+    """
     api_key = _node_api_key()
     if not api_key:
-        return None, None, (jsonify({"error": "Missing X-API-Key"}), 401)
-    return parsed, api_key, None
-
-
-def _record_readings(request_model, device_type: DeviceType):
-    parsed, api_key, error = _parse(request_model)
-    if error: return error
+        return jsonify({"error": "Missing X-API-Key"}), 401
     try:
         result = current_app.extensions["telemetry_service"].record_readings(
-            parsed.device_id, api_key, device_type, parsed.measured_at,
-            parsed.profile_version, parsed.values(),
+            body.device_id, api_key, device_type, body.measured_at,
+            body.profile_version, body.values(),
         )
     except DeviceAuthenticationFailed:
         return jsonify({"error": "Invalid device_id or API key"}), 401
@@ -215,8 +401,8 @@ def _record_readings(request_model, device_type: DeviceType):
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     return jsonify({
-        "device_id": parsed.device_id, "measured_at": _iso(result.readings[0].measured_at.value),
-        "profile_version": parsed.profile_version, "readings": [_reading_resource(r) for r in result.readings],
+        "device_id": body.device_id, "measured_at": _iso(result.readings[0].measured_at.value),
+        "profile_version": body.profile_version, "readings": [_reading_resource(r) for r in result.readings],
     }), 201 if result.created else 200
 
 
@@ -229,8 +415,9 @@ def _record_readings(request_model, device_type: DeviceType):
     responses={201: ReadingsResponse, 200: ReadingsResponse, 400: ErrorResponse,
                401: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
-def create_environment_readings():
-    return _record_readings(EnvironmentReadingRequest, DeviceType.ENVIRONMENTAL_DEVICE)
+def create_environment_readings(body: EnvironmentReadingRequest):
+    """Record the readings sent by an environmental device."""
+    return _record_readings(body, DeviceType.ENVIRONMENTAL_DEVICE)
 
 
 @tracking_api.post(
@@ -241,8 +428,9 @@ def create_environment_readings():
     responses={201: ReadingsResponse, 200: ReadingsResponse, 400: ErrorResponse,
                401: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
-def create_container_readings():
-    return _record_readings(ContainerReadingRequest, DeviceType.CONTAINER_MONITOR)
+def create_container_readings(body: ContainerReadingRequest):
+    """Record the readings sent by a container monitor."""
+    return _record_readings(body, DeviceType.CONTAINER_MONITOR)
 
 
 @tracking_api.post(
@@ -253,13 +441,18 @@ def create_container_readings():
     responses={201: ActuationEventResponse, 200: ActuationEventResponse, 400: ErrorResponse,
                401: ErrorResponse, 403: ErrorResponse, 409: ErrorResponse, 415: ErrorResponse},
 )
-def create_actuation_event():
-    parsed, api_key, error = _parse(ActuationEventRequest)
-    if error: return error
+def create_actuation_event(body: ActuationEventRequest):
+    """Record an action performed by a container monitor.
+
+    Returns 201 when the event is new and 200 when it was already stored.
+    """
+    api_key = _node_api_key()
+    if not api_key:
+        return jsonify({"error": "Missing X-API-Key"}), 401
     try:
         result = current_app.extensions["telemetry_service"].record_actuation_event(
-            parsed.device_id, api_key, parsed.action, parsed.trigger_metric,
-            parsed.trigger_state, parsed.result, parsed.occurred_at, parsed.profile_version,
+            body.device_id, api_key, body.action, body.trigger_metric,
+            body.trigger_state, body.result, body.occurred_at, body.profile_version,
         )
     except DeviceAuthenticationFailed:
         return jsonify({"error": "Invalid device_id or API key"}), 401
@@ -280,6 +473,10 @@ def create_actuation_event():
     responses={200: ConfigurationResponse, 401: ErrorResponse, 404: ErrorResponse},
 )
 def get_configuration(path: DevicePath):
+    """Return the thresholds and actuation rules cached for a device.
+
+    Responds 404 when the Edge has not synchronized a profile for it yet.
+    """
     api_key = _node_api_key()
     if not api_key:
         return jsonify({"error": "Missing X-API-Key"}), 401
@@ -295,4 +492,9 @@ def get_configuration(path: DevicePath):
 
 
 def init_routes(app):
+    """Register the Tracking blueprint in the application.
+
+    Args:
+        app: The ``OpenAPI`` application that receives the routes.
+    """
     app.register_api(tracking_api)
