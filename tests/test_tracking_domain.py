@@ -90,6 +90,13 @@ class TelemetryReadingTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not measured by CONTAINER_MONITOR nodes"):
             reading(metric=Metric.AIR_QUALITY)
 
+    def test_both_node_types_report_the_luminosity(self):
+        """The luminosity is the only metric that both node types report."""
+        for device in (ENVIRONMENTAL, CONTAINER):
+            with self.subTest(device=device.device_type):
+                self.assertEqual(reading(device=device, metric=Metric.LUMINOSITY, value=300.0).value, 300.0)
+        self.assertEqual([metric for metric in Metric if len(metric.device_types) > 1], [Metric.LUMINOSITY])
+
     def test_rejects_values_the_cloud_would_reject(self):
         """Non-finite values, booleans, invalid motion and long tags are rejected."""
         for metric, value, device in (
@@ -130,6 +137,7 @@ class ActuationEventTestCase(unittest.TestCase):
 
         self.assertEqual(caused.sync_status, SyncStatus.PENDING)
         self.assertEqual(caused.trigger_state, EnvironmentalState.WARNING)
+        self.assertEqual(action(Metric.LUMINOSITY).trigger_metric, Metric.LUMINOSITY)
         self.assertIsNone(opened_by_rfid.trigger_metric)
 
     def test_rejects_an_incomplete_or_invalid_cause(self):

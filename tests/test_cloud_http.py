@@ -27,13 +27,16 @@ _GATEWAY = "/api/v1/edge-gateways/EDGE-001"
 _REGISTRY = f"{_GATEWAY}/iot-devices"
 _PROFILE = f"{_REGISTRY}/15/environmental-profile"
 _ENVIRONMENT_TELEMETRY = f"{_REGISTRY}/15/telemetry-measurements"
+# The metrics the cloud accepts from an environmental device (MonitoredMetric of qualitrack-platform 2.1.0).
+_ENVIRONMENT_METRICS = ("AIR_QUALITY", "LUMINOSITY", "MOTION")
 
 
 class FakeCloudHandler(BaseHTTPRequestHandler):
     """Answers as the QualiTrack Cloud REST API does: sign-in, equipment list and telemetry.
 
     The telemetry route answers ``201`` for a new reading, ``200`` for one it
-    already has and ``400`` for a negative air quality.
+    already has and ``400`` for a negative air quality or a metric the
+    environmental device does not report.
     """
 
     received = []
@@ -56,6 +59,9 @@ class FakeCloudHandler(BaseHTTPRequestHandler):
         self._telemetry(body)
 
     def _telemetry(self, body):
+        if body["metric"] not in _ENVIRONMENT_METRICS:
+            return self._answer(400, {"message": f"{body['metric']} is not reported by the device"})
+
         if body["metric"] == "AIR_QUALITY" and body["value"] < 0:
             return self._answer(400, {"message": "Invalid air quality"})
 
@@ -78,6 +84,9 @@ class FakeCloudHandler(BaseHTTPRequestHandler):
                 "thresholds": [{
                     "metric": "AIR_QUALITY", "unit": "ppm", "normalMin": None,
                     "normalMax": 800.0, "criticalMin": None, "criticalMax": 1200.0
+                }, {
+                    "metric": "LUMINOSITY", "unit": "lux", "normalMin": None,
+                    "normalMax": 500.0, "criticalMin": None, "criticalMax": 1000.0
                 }]
             })
 
@@ -145,9 +154,9 @@ class CloudOverHttpTestCase(unittest.TestCase):
     def test_the_sync_command_sends_what_the_nodes_sent_to_the_edge(self):
         client = self.app.test_client()
         measured_at = (datetime.now(UTC) - timedelta(minutes=10)).replace(microsecond=0)
-        for minutes, air_quality in ((0, 412.5), (1, -3.0)):
+        for minutes, metrics in ((0, {"air_quality": 412.5, "luminosity": 0, "motion": True}), (1, {"air_quality": -3.0})):
             sent = client.post("/api/v1/monitoring/environment-readings", headers={"X-API-Key": "test-only-key"},
-                               json={"device_id": "ENV-001", "air_quality": air_quality, "profile_version": 2,
+                               json={"device_id": "ENV-001", **metrics, "profile_version": 2,
                                      "measured_at": (measured_at + timedelta(minutes=minutes)).isoformat()})
             self.assertEqual(sent.status_code, 201)
         session = CloudSession(self.base_url, "EDGE-001", "gateway-secret")
@@ -178,19 +187,20 @@ class CloudOverHttpTestCase(unittest.TestCase):
         profile_requests = [path for method, path, _, _ in FakeCloudHandler.received
                             if path.endswith("/environmental-profile")]
         self.assertEqual(set(profile_requests),{_PROFILE})
-        self.assertIn("Readings: 1 synced, 1 rejected, 0 waiting", first.output)
+        self.assertIn("Readings: 3 synced, 1 rejected, 0 waiting", first.output)
         self.assertIn("Readings: 0 synced, 0 rejected, 0 waiting", second.output)
         telemetry = [(body, authorization) for method, path, body, authorization in FakeCloudHandler.received
                      if path == _ENVIRONMENT_TELEMETRY]
-        self.assertEqual(len(telemetry), 2)
-        # The two readings are sent in parallel, so they may arrive in either order.
-        self.assertIn(({
-            "metric": "AIR_QUALITY", "value": 412.5, "textValue": None,
-            "measuredAt": measured_at.isoformat().replace("+00:00", "Z"), "profileVersion": 2,
-        }, "gateway-secret"), telemetry)
+        self.assertEqual(len(telemetry), 4)
+        # The readings are sent in parallel, so they may arrive in either order.
+        for metric, value in (("AIR_QUALITY", 412.5), ("LUMINOSITY", 0.0), ("MOTION", 1.0)):
+            self.assertIn(({
+                "metric": metric, "value": value, "textValue": None,
+                "measuredAt": measured_at.isoformat().replace("+00:00", "Z"), "profileVersion": 2,
+            }, "gateway-secret"), telemetry)
         with self.app.app_context():
             statuses = [row.sync_status for row in TelemetryReadingModel.select().order_by(TelemetryReadingModel.id)]
-        self.assertEqual(statuses, ["SYNCED", "REJECTED"])
+        self.assertEqual(statuses, ["SYNCED", "SYNCED", "SYNCED", "REJECTED"])
 
         configuration = client.get("/api/v1/configurations/ENV-001", headers={"X-API-Key": "test-only-key"})
         self.assertEqual(configuration.status_code, 200)
@@ -199,6 +209,9 @@ class CloudOverHttpTestCase(unittest.TestCase):
         self.assertEqual(configuration.json["thresholds"], [{
             "metric": "AIR_QUALITY", "unit": "ppm", "normal_min": None, "normal_max": 800.0,
             "critical_min": None, "critical_max": 1200.0,
+        }, {
+            "metric": "LUMINOSITY", "unit": "lux", "normal_min": None, "normal_max": 500.0,
+            "critical_min": None, "critical_max": 1000.0,
         }])
         self.assertEqual(configuration.json["updated_at"], "2026-11-03T14:00:00Z")
 
