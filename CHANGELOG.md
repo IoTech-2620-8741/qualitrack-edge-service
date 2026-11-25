@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-25
+
 ### Added
 
-- Tracking (tracking): `POST /api/v1/monitoring/environment-readings` accepts `luminosity` (lux, a JSON number of 0 or more), the light of the room that the Environment Monitor measures with its BH1750, alone or with `air_quality` and `motion`. It is stored as a `LUMINOSITY` reading like the one of the container monitor. A node that does not send it works as before. The cloud accepts it from qualitrack-platform 2.1.0; an older one rejects it for good. Update the Edge before the firmware that sends it: 1.0.0 answers `400` to the whole request.
+- Tracking (tracking): `POST /api/v1/monitoring/environment-readings` accepts `luminosity` (lux, a JSON number of 0 or more), the light of the room that the Environment Monitor measures with its BH1750, alone or with `air_quality` and `motion`. It is stored as a `LUMINOSITY` reading like the one of the container monitor. A node that does not send it works as before. The cloud accepts it from qualitrack-platform 2.1.0; an older one rejects it for good. Update the Edge before the firmware that sends it: 1.0.0 answers `400` to the whole request (#43, #44).
 - IAM, Tracking, Sync and Shared: `flask-openapi3` builds the OpenAPI document of the routes from their request and response models and serves it at `/openapi/openapi.json`, with its viewers under `/openapi/` (Swagger UI, ReDoc, RapiDoc, RapiPDF, Scalar and Elements). The routes, status codes and error bodies stay the same: a validation error still answers `400` (or `401` for a telemetry request without `device_id`), never `422`, and `POST /api/v1/devices/enroll` still answers `403` outside development, `403` to a node the cached registry does not authorize, `409` to a registered one and `Cache-Control: no-store` with the API key (#42, #45).
 
 ### Changed
 
-- Tracking (tracking): `Metric.device_type` is replaced by `Metric.device_types`, because `LUMINOSITY` is reported by both node types. Only a container monitor still sends temperature, humidity, RFID tags and actions, and only the environmental device sends air quality and motion.
+- Tracking (tracking): `Metric.device_type` is replaced by `Metric.device_types`, because `LUMINOSITY` is reported by both node types. Only a container monitor still sends temperature, humidity, RFID tags and actions, and only the environmental device sends air quality and motion (#43).
 
 ## [1.0.0] - 2026-11-15
 
@@ -134,7 +136,8 @@ First version of the Edge Application of QualiTrack: the Edge stories of the Qua
 
 - IAM (iam): `POST /api/v1/iam/authentications`, replaced by `POST /api/v1/auth/sign-in` (#2).
 
-[Unreleased]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.3.0...v0.3.1
