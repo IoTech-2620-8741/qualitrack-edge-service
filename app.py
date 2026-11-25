@@ -18,7 +18,7 @@ import logging
 import os
 from datetime import timedelta
 from pathlib import Path
-from flask_openapi import OpenAPI, Info, Tag
+from flask_openapi3 import OpenAPI, Info
 from config import load_config
 from iam.application.services import AuthApplicationService
 from iam.interfaces.cli import devices_cli
@@ -40,27 +40,36 @@ from sync.interfaces.cli import cloud_cli
 from tracking.application.services import (EnvironmentalProfileApplicationService, TelemetryApplicationService,)
 from tracking.infrastructure.repositories import ( ActuationEventRepository as ActuationEventRepositoryImpl, EnvironmentalProfileRepository as EnvironmentalProfileRepositoryImpl, TelemetryReadingRepository as TelemetryReadingRepositoryImpl,)
 from tracking.integration.iam_anti_corruption_layer import IamAntiCorruptionLayer
+from iam.interfaces.services import init_routes as init_iam_routes
 from tracking.interfaces.services import init_routes as init_tracking_routes
 from sync.interfaces.services import init_routes as init_sync_routes
 from shared.interfaces.services import init_routes as init_health_routes
-from iam.interfaces.services import init_routes as init_iam_routes
+
 
 def create_app() -> OpenAPI:
-    """Create and initialize the Flask application."""
     info = Info(title="QualiTrack Edge Service API", version="1.0.0")
-
-    app = OpenAPI(__name__, info=info)
+    security_schemes = {
+        "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+        "BearerAuth": {"type": "http", "scheme": "bearer"},
+    }
+    app = OpenAPI(
+        __name__,
+        info=info,
+        security_schemes=security_schemes,
+        doc_ui={
+            "swagger": True,
+            "redoc": True,
+            "rapidoc": True,
+            "rapipdf": True,
+            "scalar": True,
+            "elements": True
+        }
+    )
     app.config.from_mapping(load_config(Path(__file__).resolve().parent))
     configure_database(app.config["DATABASE_PATH"])
     init_db()
 
-    init_iam_routes(app)
-    init_health_routes(app)
-    init_sync_routes(app)
-    init_tracking_routes(app)
-
-    app.cli.add_command(devices_cli)
-    app.cli.add_command(cloud_cli)
+    # 1. Inicializar los servicios primero para que estén listos
     iam_authentication_service = AuthApplicationService()
     app.extensions["iam_authentication_service"] = iam_authentication_service
     iam_anti_corruption_layer = IamAntiCorruptionLayer(iam_authentication_service)
@@ -120,6 +129,14 @@ def create_app() -> OpenAPI:
             app.config["TEST_DEVICE_ID"],
             app.config["TEST_DEVICE_API_KEY"],
         )
+
+    init_iam_routes(app)
+    init_tracking_routes(app)
+    init_sync_routes(app)
+    init_health_routes(app)
+
+    app.cli.add_command(devices_cli)
+    app.cli.add_command(cloud_cli)
 
     @app.teardown_appcontext
     def close_database(_exception: BaseException | None) -> None:
