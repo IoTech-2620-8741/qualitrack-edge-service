@@ -98,6 +98,21 @@ class CloudSessionTestCase(unittest.TestCase):
                 self.assertEqual(raised.exception.status_code, status)
                 self.assertEqual(len(self.http.calls), 1)
 
+    def test_tells_the_reason_the_cloud_gives_for_a_refused_gateway(self):
+        """A 403 with an error body carries the reason of the cloud."""
+        session = self.session(FakeResponse(403, {
+            "code": "EDGE_GATEWAY_NOT_ALLOWED",
+            "message": "The Edge Gateway is in MAINTENANCE status; "
+                       "only operational Gateways connect",
+        }))
+
+        with self.assertRaises(CloudRejectedError) as raised:
+            session.request("GET", "/api/v1/any")
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertIn("is not authorized", str(raised.exception))
+        self.assertIn("MAINTENANCE", str(raised.exception))
+
     def test_reports_an_unreachable_or_failing_cloud(self):
         """Connection errors, timeouts, and 503 raise CloudUnavailableError."""
         for response in (
