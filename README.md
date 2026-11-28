@@ -246,6 +246,13 @@ flask --app app cloud devices
 flask --app app cloud profiles
 ```
 
+If the station loses the key or it is exposed, regenerate it in the detail of
+the Edge Gateway (platform 2.2.0): the previous key stops working at once, so
+set the new one in `CLOUD_API_KEY` and restart the service. A Gateway that is
+in maintenance, out of service, inactive or not placed in an environment cannot
+connect: the cloud answers `403` with the reason, which the synchronization
+logs.
+
 `cloud sync` runs now what the background thread runs every
 `CLOUD_SYNC_INTERVAL_SECONDS` while the service is up:
 
@@ -273,7 +280,8 @@ flask --app app cloud profiles
      `REJECTED` and the reason is logged.
    - A node the registry does not place in an environment yet: its records
      stay `PENDING` until it is; they are counted, not read.
-   - Cloud not reachable, a server error or a rejected API key: the
+   - Cloud not reachable, a server error, a rejected API key or a Gateway
+     the cloud does not let connect: the
      synchronization stops once the four records in flight are answered, the
      records keep their state and the next cycle retries them.
 4. It deletes the records that became `SYNCED` more than

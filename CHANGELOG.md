@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-28
+
+### Changed
+
+- The synchronization logs the reason the cloud gives when it refuses the Edge Gateway with 403, for example a Gateway in maintenance, which the platform tells since its fix of the end-to-end test (platform #49). The README explains how to regenerate a lost or exposed API key and what the 403 means (#48).
+
 ## [1.1.0] - 2026-11-25
 
 ### Added
@@ -136,7 +142,8 @@ First version of the Edge Application of QualiTrack: the Edge stories of the Qua
 
 - IAM (iam): `POST /api/v1/iam/authentications`, replaced by `POST /api/v1/auth/sign-in` (#2).
 
-[Unreleased]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/IoTech-2620-8741/qualitrack-edge-service/compare/v0.3.1...v0.4.0

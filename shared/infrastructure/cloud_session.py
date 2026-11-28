@@ -132,9 +132,30 @@ class CloudSession:
             )
 
         if response.status_code == 403:
+            # The cloud tells why, for example a Gateway in maintenance (platform 2.2.0).
+            reason = _cloud_reason(response)
             raise CloudRejectedError(
-                "Edge Gateway is not authorized for this resource",
+                "Edge Gateway is not authorized for this resource"
+                + (f": {reason}" if reason else ""),
                 403,
             )
 
         return response
+
+
+def _cloud_reason(response: requests.Response) -> str | None:
+    """Return the reason the cloud gave in its error body, if any.
+
+    Args:
+        response: Error response of the cloud.
+
+    Returns:
+        The ``message`` of a JSON error body, or ``None`` when the body
+        has none.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    message = body.get("message") if isinstance(body, dict) else None
+    return message.strip() if isinstance(message, str) and message.strip() else None
