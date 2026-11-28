@@ -122,7 +122,7 @@ def create_app() -> OpenAPI:
     Returns:
         The configured ``OpenAPI`` application.
     """
-    info = Info(title="QualiTrack Edge Service API", version="1.1.0")
+    info = Info(title="QualiTrack Edge Service API", version="1.1.1")
     security_schemes = {
         "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
         "BearerAuth": {"type": "http", "scheme": "bearer"},
